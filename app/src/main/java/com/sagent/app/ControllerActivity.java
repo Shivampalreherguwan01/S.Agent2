@@ -24,7 +24,6 @@ public class ControllerActivity extends AppCompatActivity {
         textView.setTextSize(20);
         textView.setPadding(50, 50, 50, 50);
         
-        // Screen par touch detect karna
         textView.setOnTouchListener((v, event) -> {
             if (event.getAction() == MotionEvent.ACTION_DOWN) {
                 sendTouchCommand(event.getX(), event.getY());
@@ -35,7 +34,8 @@ public class ControllerActivity extends AppCompatActivity {
         setContentView(textView);
 
         try {
-            mSocket = IO.socket("http://10.0.2.2:3000");
+            // Render ka Live URL
+            mSocket = IO.socket("https://s-agent-relay.onrender.com");
             mSocket.connect();
         } catch (URISyntaxException e) {
             e.printStackTrace();

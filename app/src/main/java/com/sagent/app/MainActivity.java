@@ -16,7 +16,7 @@ import io.socket.client.Socket;
 public class MainActivity extends AppCompatActivity {
     private static final int REQUEST_CODE_SCREEN_CAPTURE = 1;
     private Socket mSocket;
-    private String roomId = "Room_123"; // Aap ise random generate kar sakte hain
+    private String roomId = "Room_SAgent2"; // Default room
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -30,32 +30,29 @@ public class MainActivity extends AppCompatActivity {
         etRoomId.setHint("Enter Room ID (e.g. 1234)");
         etRoomId.setText(roomId);
         
-        // 1. HOST MODE (Jisko control karna hai)
+        // 1. HOST MODE
         Button btnHost = new Button(this);
         btnHost.setText("HOST MODE (Let others control this phone)");
         btnHost.setOnClickListener(v -> {
             roomId = etRoomId.getText().toString();
             
-            // Accessibility Permission
             Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
             startActivity(intent);
             Toast.makeText(this, "Enable Accessibility for S.Agent2", Toast.LENGTH_LONG).show();
 
-            // Screen Capture Permission
             MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
             startActivityForResult(mpm.createScreenCaptureIntent(), REQUEST_CODE_SCREEN_CAPTURE);
             
             connectToServer("host");
         });
 
-        // 2. CONTROLLER MODE (Jo control karega)
+        // 2. CONTROLLER MODE
         Button btnController = new Button(this);
         btnController.setText("CONTROLLER MODE (Control another phone)");
         btnController.setOnClickListener(v -> {
             roomId = etRoomId.getText().toString();
             connectToServer("controller");
             
-            // Open a new screen for touchpad (Hum ise next step mein banayenge)
             Intent intent = new Intent(this, ControllerActivity.class);
             intent.putExtra("roomId", roomId);
             startActivity(intent);
@@ -69,8 +66,8 @@ public class MainActivity extends AppCompatActivity {
 
     private void connectToServer(String role) {
         try {
-            // Yahan apne hosted server ka URL daalein (e.g. https://my-server.onrender.com)
-            mSocket = IO.socket("http://10.0.2.2:3000"); 
+            // Render ka Live URL yahan daal diya hai
+            mSocket = IO.socket("https://s-agent-relay.onrender.com"); 
             mSocket.connect();
             
             if (role.equals("host")) {
