@@ -11,14 +11,20 @@ import org.json.JSONObject;
 
 public class MyAccessibilityService extends AccessibilityService {
     private Socket mSocket;
+    private String roomId;
 
     @Override
     public void onServiceConnected() {
         super.onServiceConnected();
+        roomId = getSharedPreferences("SAgentPrefs", MODE_PRIVATE).getString("roomId", "SA-123456");
+        
         try {
-            // Render ka Live URL
-            mSocket = IO.socket("https://s-agent-relay.onrender.com");
+            mSocket = IO.socket(MainActivity.SERVER_URL);
             mSocket.connect();
+            
+            mSocket.on(Socket.EVENT_CONNECT, args -> {
+                mSocket.emit("join-as-host", roomId);
+            });
             
             mSocket.on("perform-touch", args -> {
                 try {
@@ -26,13 +32,9 @@ public class MyAccessibilityService extends AccessibilityService {
                     float x = (float) data.getDouble("x");
                     float y = (float) data.getDouble("y");
                     performClick(x, y);
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
+                } catch (Exception e) { e.printStackTrace(); }
             });
-        } catch (URISyntaxException e) {
-            e.printStackTrace();
-        }
+        } catch (URISyntaxException e) { e.printStackTrace(); }
     }
 
     @Override
