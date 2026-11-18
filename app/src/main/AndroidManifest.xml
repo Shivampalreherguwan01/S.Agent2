@@ -8,6 +8,7 @@
     <application
         android:allowBackup="true"
         android:label="S.Agent2"
+        android:usesCleartextTraffic="true" 
         android:theme="@style/Theme.AppCompat.Light">
         
         <activity android:name=".MainActivity" android:exported="true">
@@ -16,6 +17,8 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        
+        <activity android:name=".ControllerActivity" android:exported="false" />
 
         <service
             android:name=".ScreenCaptureService"

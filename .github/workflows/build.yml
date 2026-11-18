@@ -20,13 +20,13 @@ jobs:
     - name: Setup Gradle
       uses: gradle/actions/setup-gradle@v3
       with:
-        gradle-version: '8.2'  # Yahan humne Gradle 8.2 fix kar diya hai
+        gradle-version: '8.2'
         
-    - name: Build with Gradle
-      run: gradle assembleDebug
+    - name: Build Release APK
+      run: gradle assembleRelease
       
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
-        name: S.Agent2-APK
-        path: app/build/outputs/apk/debug/app-debug.apk
+        name: S.Agent2-Release-APK
+        path: app/build/outputs/apk/release/app-release.apk

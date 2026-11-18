@@ -4,19 +4,42 @@ import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
 import android.graphics.Path;
 import android.view.accessibility.AccessibilityEvent;
+import java.net.URISyntaxException;
+import io.socket.client.IO;
+import io.socket.client.Socket;
+import org.json.JSONObject;
 
 public class MyAccessibilityService extends AccessibilityService {
+    private Socket mSocket;
 
     @Override
-    public void onAccessibilityEvent(AccessibilityEvent event) {
-        // Yahan aap server se aane wale commands ko listen karenge
-        // Example: Agar server se "TAP X Y" aaya, toh performClick(x, y) call hoga
+    public void onServiceConnected() {
+        super.onServiceConnected();
+        try {
+            mSocket = IO.socket("http://10.0.2.2:3000"); // Server URL
+            mSocket.connect();
+            
+            mSocket.on("perform-touch", args -> {
+                try {
+                    JSONObject data = (JSONObject) args[0];
+                    float x = (float) data.getDouble("x");
+                    float y = (float) data.getDouble("y");
+                    performClick(x, y);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            });
+        } catch (URISyntaxException e) {
+            e.printStackTrace();
+        }
     }
+
+    @Override
+    public void onAccessibilityEvent(AccessibilityEvent event) {}
 
     @Override
     public void onInterrupt() {}
 
-    // Ye method dusre phone se aaye hue touch ko execute karega
     public void performClick(float x, float y) {
         Path path = new Path();
         path.moveTo(x, y);

@@ -13,8 +13,19 @@ android {
         versionCode 1
         versionName "1.0"
     }
+
+    signingConfigs {
+        release {
+            storeFile file("../sagent.jks")
+            storePassword "Sagent@2024"
+            keyAlias "sagent"
+            keyPassword "Sagent@2024"
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig signingConfigs.release
             minifyEnabled false
         }
     }
@@ -27,5 +38,8 @@ android {
 dependencies {
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'com.google.android.material:material:1.11.0'
-    // Yahan aap WebSocket ya WebRTC ki library baad mein add kar sakte hain
+    // Socket.IO client for Web Server communication
+    implementation ('io.socket:socket.io-client:2.1.0') {
+        exclude group: 'org.json', module: 'json'
+    }
 }
