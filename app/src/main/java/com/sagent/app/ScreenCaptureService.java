@@ -10,6 +10,7 @@ import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
 import android.os.Build;
 import android.os.IBinder;
+import android.util.Log;
 import androidx.annotation.Nullable;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -21,6 +22,7 @@ import io.socket.client.IO;
 import io.socket.client.Socket;
 
 public class ScreenCaptureService extends Service {
+    private static final String TAG = "HostService";
     private Socket mSocket;
     private String roomId;
     private MediaProjection mediaProjection;
@@ -31,6 +33,7 @@ public class ScreenCaptureService extends Service {
     private SurfaceTextureHelper surfaceTextureHelper;
     private EglBase eglBase;
     private final List<IceCandidate> iceCandidates = new ArrayList<>();
+    private boolean isPeerConnectionCreated = false;
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
@@ -39,7 +42,8 @@ public class ScreenCaptureService extends Service {
             NotificationManager manager = getSystemService(NotificationManager.class);
             manager.createNotificationChannel(channel);
             Notification notification = new Notification.Builder(this, "sagent")
-                    .setContentTitle("S.Agent2 Host Running")
+                    .setContentTitle("S.Agent2 Running")
+                    .setContentText("Waiting for controller to connect...")
                     .setSmallIcon(android.R.drawable.ic_menu_camera)
                     .build();
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -66,13 +70,13 @@ public class ScreenCaptureService extends Service {
             }, null);
         }
 
-        initWebRTC(data);
+        initWebRTCBase(data);
         initSocket();
         
         return START_STICKY;
     }
 
-    private void initWebRTC(Intent data) {
+    private void initWebRTCBase(Intent data) {
         PeerConnectionFactory.InitializationOptions initOptions = PeerConnectionFactory.InitializationOptions.builder(this).createInitializationOptions();
         PeerConnectionFactory.initialize(initOptions);
 
@@ -87,17 +91,36 @@ public class ScreenCaptureService extends Service {
         videoCapturer.startCapture(540, 960, 30);
 
         localVideoTrack = peerConnectionFactory.createVideoTrack("VIDEO_TRACK", videoSource);
+    }
+
+    private void createPeerConnectionAndOffer() {
+        if (isPeerConnectionCreated) return;
 
         List<PeerConnection.IceServer> iceServers = new ArrayList<>();
+        // STUN Servers
         iceServers.add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer());
         iceServers.add(PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer());
+        
+        // TURN Server (Free OpenRelay - Zaroori hai CGNAT/4G ke liye)
+        iceServers.add(PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80")
+                .setUsername("openrelayproject").setPassword("openrelayproject").createIceServer());
+        iceServers.add(PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443")
+                .setUsername("openrelayproject").setPassword("openrelayproject").createIceServer());
+        iceServers.add(PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443?transport=tcp")
+                .setUsername("openrelayproject").setPassword("openrelayproject").createIceServer());
 
         PeerConnection.RTCConfiguration rtcConfig = new PeerConnection.RTCConfiguration(iceServers);
+        rtcConfig.sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN;
+
         peerConnection = peerConnectionFactory.createPeerConnection(rtcConfig, new PeerConnection.Observer() {
             @Override public void onSignalingChange(PeerConnection.SignalingState signalingState) {}
-            @Override public void onIceConnectionChange(PeerConnection.IceConnectionState iceConnectionState) {}
+            @Override public void onIceConnectionChange(PeerConnection.IceConnectionState state) {
+                Log.d(TAG, "ICE State: " + state);
+            }
             @Override public void onIceConnectionReceivingChange(boolean b) {}
-            @Override public void onIceGatheringChange(PeerConnection.IceGatheringState iceGatheringState) {}
+            @Override public void onIceGatheringChange(PeerConnection.IceGatheringState state) {
+                 Log.d(TAG, "ICE Gathering: " + state);
+            }
             @Override public void onIceCandidate(IceCandidate iceCandidate) {
                 JSONObject obj = new JSONObject();
                 try {
@@ -115,7 +138,8 @@ public class ScreenCaptureService extends Service {
         });
 
         peerConnection.addTrack(localVideoTrack);
-        // REMOVED immediate createOffer() from here
+        isPeerConnectionCreated = true;
+        createOffer();
     }
 
     private void createOffer() {
@@ -125,7 +149,7 @@ public class ScreenCaptureService extends Service {
                     @Override public void onCreateSuccess(SessionDescription sessionDescription) {}
                     @Override public void onSetSuccess() {}
                     @Override public void onCreateFailure(String s) {}
-                    @Override public void onSetFailure(String s) { s.toString(); } 
+                    @Override public void onSetFailure(String s) { Log.e(TAG, "SetLocalDesc Fail: " + s); } 
                 }, sessionDescription);
                 
                 JSONObject obj = new JSONObject();
@@ -133,10 +157,11 @@ public class ScreenCaptureService extends Service {
                     obj.put("roomId", roomId);
                     obj.put("sdp", sessionDescription.description);
                     mSocket.emit("offer", obj);
+                    Log.d(TAG, "Offer Emitted!");
                 } catch (JSONException e) { e.printStackTrace(); }
             }
             @Override public void onSetSuccess() {}
-            @Override public void onCreateFailure(String s) {}
+            @Override public void onCreateFailure(String s) { Log.e(TAG, "CreateOffer Fail: " + s); }
             @Override public void onSetFailure(String s) {}
         }, new MediaConstraints());
     }
@@ -146,8 +171,10 @@ public class ScreenCaptureService extends Service {
             mSocket = IO.socket(MainActivity.SERVER_URL);
             mSocket.on(Socket.EVENT_CONNECT, args -> mSocket.emit("join", roomId));
             
-            // Jab controller room mein aayega tab Offer banega
-            mSocket.on("controller-joined", args -> createOffer());
+            mSocket.on("controller-joined", args -> {
+                Log.d(TAG, "Controller Joined, Creating Offer...");
+                createPeerConnectionAndOffer();
+            });
             
             mSocket.on("answer", args -> {
                 String sdp = (String) args[0];
@@ -156,7 +183,7 @@ public class ScreenCaptureService extends Service {
                     @Override public void onCreateSuccess(SessionDescription sessionDescription) {}
                     @Override public void onSetSuccess() {}
                     @Override public void onCreateFailure(String s) {}
-                    @Override public void onSetFailure(String s) { s.toString(); }
+                    @Override public void onSetFailure(String s) { Log.e(TAG, "SetRemoteDesc Fail: " + s); }
                 }, answer);
                 
                 for (IceCandidate candidate : iceCandidates) {
@@ -168,7 +195,7 @@ public class ScreenCaptureService extends Service {
             mSocket.on("ice-candidate", args -> {
                 String sdp = (String) args[0];
                 IceCandidate candidate = new IceCandidate("0", 0, sdp);
-                if (peerConnection.getRemoteDescription() != null) {
+                if (peerConnection != null && peerConnection.getRemoteDescription() != null) {
                     peerConnection.addIceCandidate(candidate);
                 } else {
                     iceCandidates.add(candidate);

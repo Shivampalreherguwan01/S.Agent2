@@ -2,6 +2,7 @@ package com.sagent.app;
 
 import android.graphics.Color;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.MotionEvent;
 import android.widget.FrameLayout;
 import android.widget.TextView;
@@ -16,6 +17,7 @@ import io.socket.client.IO;
 import io.socket.client.Socket;
 
 public class LiveControlActivity extends AppCompatActivity {
+    private static final String TAG = "ControllerActivity";
     private Socket mSocket;
     private String roomId;
     private TextView statusText;
@@ -35,7 +37,7 @@ public class LiveControlActivity extends AppCompatActivity {
 
         surfaceViewRenderer = new SurfaceViewRenderer(this);
         statusText = new TextView(this);
-        statusText.setText("Connecting WebRTC...\nPlease wait.");
+        statusText.setText("Requesting Host to connect...\nPlease wait.");
         statusText.setTextColor(Color.CYAN);
         statusText.setTextSize(18);
         statusText.setPadding(30, 30, 30, 30);
@@ -61,7 +63,7 @@ public class LiveControlActivity extends AppCompatActivity {
                     data.put("roomId", roomId);
                     data.put("xRatio", normalizedX);
                     data.put("yRatio", normalizedY);
-                    mSocket.emit("touch-event", data);
+                    if(mSocket != null) mSocket.emit("touch-event", data);
                 } catch (JSONException e) { e.printStackTrace(); }
             }
             return true;
@@ -80,14 +82,25 @@ public class LiveControlActivity extends AppCompatActivity {
         List<PeerConnection.IceServer> iceServers = new ArrayList<>();
         iceServers.add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer());
         iceServers.add(PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer());
+        
+        // TURN Servers
+        iceServers.add(PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80")
+                .setUsername("openrelayproject").setPassword("openrelayproject").createIceServer());
+        iceServers.add(PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443")
+                .setUsername("openrelayproject").setPassword("openrelayproject").createIceServer());
 
         PeerConnection.RTCConfiguration rtcConfig = new PeerConnection.RTCConfiguration(iceServers);
+        rtcConfig.sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN;
+
         peerConnection = peerConnectionFactory.createPeerConnection(rtcConfig, new PeerConnection.Observer() {
             @Override public void onSignalingChange(PeerConnection.SignalingState signalingState) {}
             @Override public void onIceConnectionChange(PeerConnection.IceConnectionState iceConnectionState) {
+                Log.d(TAG, "ICE State: " + iceConnectionState);
                 runOnUiThread(() -> {
                     if(iceConnectionState == PeerConnection.IceConnectionState.CONNECTED) {
                         statusText.setVisibility(TextView.GONE);
+                    } else if (iceConnectionState == PeerConnection.IceConnectionState.FAILED) {
+                        statusText.setText("Connection Failed. Host might be offline or network issue.");
                     }
                 });
             }
@@ -98,7 +111,7 @@ public class LiveControlActivity extends AppCompatActivity {
                 try {
                     obj.put("roomId", roomId);
                     obj.put("candidate", iceCandidate.sdp);
-                    mSocket.emit("ice-candidate", obj);
+                    if(mSocket != null) mSocket.emit("ice-candidate", obj);
                 } catch (JSONException e) { e.printStackTrace(); }
             }
             @Override public void onIceCandidatesRemoved(IceCandidate[] iceCandidates) {}
@@ -119,10 +132,10 @@ public class LiveControlActivity extends AppCompatActivity {
         try {
             mSocket = IO.socket(MainActivity.SERVER_URL);
             
-            // Connect hote hi Server ko batayenge ki Controller aa gaya
             mSocket.on(Socket.EVENT_CONNECT, args -> {
                 mSocket.emit("join", roomId);
                 mSocket.emit("request-connect", roomId);
+                runOnUiThread(() -> statusText.setText("Request Sent. Waiting for Host..."));
             });
 
             mSocket.on("offer", args -> {
@@ -133,7 +146,7 @@ public class LiveControlActivity extends AppCompatActivity {
                     @Override public void onCreateSuccess(SessionDescription sessionDescription) {}
                     @Override public void onSetSuccess() {}
                     @Override public void onCreateFailure(String s) {}
-                    @Override public void onSetFailure(String s) { s.toString(); }
+                    @Override public void onSetFailure(String s) { Log.e(TAG, "SetRemoteDesc Fail: " + s); }
                 }, offer);
                 
                 for (IceCandidate candidate : iceCandidates) {
@@ -147,7 +160,7 @@ public class LiveControlActivity extends AppCompatActivity {
                             @Override public void onCreateSuccess(SessionDescription sessionDescription) {}
                             @Override public void onSetSuccess() {}
                             @Override public void onCreateFailure(String s) {}
-                            @Override public void onSetFailure(String s) { s.toString(); }
+                            @Override public void onSetFailure(String s) { Log.e(TAG, "SetLocalDesc Fail: " + s); }
                         }, sessionDescription);
                         
                         JSONObject obj = new JSONObject();
@@ -155,10 +168,11 @@ public class LiveControlActivity extends AppCompatActivity {
                             obj.put("roomId", roomId);
                             obj.put("sdp", sessionDescription.description);
                             mSocket.emit("answer", obj);
+                            Log.d(TAG, "Answer Emitted!");
                         } catch (JSONException e) { e.printStackTrace(); }
                     }
                     @Override public void onSetSuccess() {}
-                    @Override public void onCreateFailure(String s) {}
+                    @Override public void onCreateFailure(String s) { Log.e(TAG, "CreateAnswer Fail: " + s); }
                     @Override public void onSetFailure(String s) {}
                 }, new MediaConstraints());
             });
@@ -166,7 +180,7 @@ public class LiveControlActivity extends AppCompatActivity {
             mSocket.on("ice-candidate", args -> {
                 String sdp = (String) args[0];
                 IceCandidate candidate = new IceCandidate("0", 0, sdp);
-                if (peerConnection.getRemoteDescription() != null) {
+                if (peerConnection != null && peerConnection.getRemoteDescription() != null) {
                     peerConnection.addIceCandidate(candidate);
                 } else {
                     iceCandidates.add(candidate);

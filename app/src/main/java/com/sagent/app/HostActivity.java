@@ -52,9 +52,9 @@ public class HostActivity extends AppCompatActivity {
         title.setTextSize(28);
         
         TextView tvCode = new TextView(this);
-        tvCode.setText("Code:\n" + roomId);
+        tvCode.setText("Share this Code:\n" + roomId);
         tvCode.setTextColor(Color.parseColor("#00E676"));
-        tvCode.setTextSize(36);
+        tvCode.setTextSize(32);
         tvCode.setGravity(Gravity.CENTER);
         tvCode.setPadding(0, 30, 0, 30);
 
@@ -63,7 +63,7 @@ public class HostActivity extends AppCompatActivity {
         btnAccess.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
 
         Button btnShare = new Button(this);
-        btnShare.setText("2. SHARE SCREEN & CONNECT");
+        btnShare.setText("2. START SHARING");
         btnShare.setOnClickListener(v -> {
             MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
             startActivityForResult(mpm.createScreenCaptureIntent(), REQUEST_CODE_SCREEN_CAPTURE);
@@ -80,7 +80,7 @@ public class HostActivity extends AppCompatActivity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == REQUEST_CODE_SCREEN_CAPTURE && resultCode == RESULT_OK) {
-            Toast.makeText(this, "Starting WebRTC Stream...", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Screen Sharing Started! You can minimize the app.", Toast.LENGTH_LONG).show();
             Intent serviceIntent = new Intent(this, ScreenCaptureService.class);
             serviceIntent.putExtra("resultCode", resultCode);
             serviceIntent.putExtra("data", data);
@@ -90,6 +90,8 @@ public class HostActivity extends AppCompatActivity {
             } else {
                 startService(serviceIntent);
             }
+            // Activity ko band kar do taaki user home screen par ja sake
+            finishAffinity(); 
         }
     }
 }
