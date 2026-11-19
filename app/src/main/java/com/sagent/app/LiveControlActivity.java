@@ -9,7 +9,6 @@ import android.view.MotionEvent;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.TextView;
-import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 import java.net.URISyntaxException;
 import io.socket.client.IO;
@@ -36,8 +35,8 @@ public class LiveControlActivity extends AppCompatActivity {
         imageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
         
         statusText = new TextView(this);
-        statusText.setText("Waking up server...\nPlease wait up to 60 seconds.");
-        statusText.setTextColor(Color.WHITE);
+        statusText.setText("Connecting to Server...\n(Please wait 50s for server to wake up)");
+        statusText.setTextColor(Color.YELLOW);
         statusText.setTextSize(18);
         statusText.setPadding(30, 30, 30, 30);
 
@@ -47,25 +46,27 @@ public class LiveControlActivity extends AppCompatActivity {
 
         try {
             mSocket = IO.socket(MainActivity.SERVER_URL);
-            mSocket.connect();
             
-            // Agar pehle se connected hai
-            if (mSocket.connected()) {
-                mSocket.emit("request-connect", roomId);
-                runOnUiThread(() -> statusText.setText("Requesting Host to connect..."));
-            }
-
             mSocket.on(Socket.EVENT_CONNECT, args -> {
                 mSocket.emit("request-connect", roomId);
-                runOnUiThread(() -> statusText.setText("Requesting Host to connect..."));
+                runOnUiThread(() -> {
+                    statusText.setText("✅ Server Connected!\nRequesting Host...");
+                    statusText.setTextColor(Color.GREEN);
+                });
             });
 
             mSocket.on(Socket.EVENT_CONNECT_ERROR, args -> {
-                runOnUiThread(() -> statusText.setText("Server Error. Please restart App."));
+                runOnUiThread(() -> {
+                    statusText.setText("❌ Server Error!\nCheck Internet.");
+                    statusText.setTextColor(Color.RED);
+                });
             });
 
             mSocket.on("connection-accepted", args -> {
-                runOnUiThread(() -> statusText.setText("Connected! Waiting for screen data..."));
+                runOnUiThread(() -> {
+                    statusText.setText("⏳ Connected! Waiting for Screen...");
+                    statusText.setTextColor(Color.CYAN);
+                });
             });
 
             mSocket.on("receive-screen", args -> {
@@ -80,17 +81,20 @@ public class LiveControlActivity extends AppCompatActivity {
                     
                     runOnUiThread(() -> {
                         imageView.setImageBitmap(decodedByte);
-                        statusText.setVisibility(TextView.GONE); // Screen aate hi text hata do
+                        statusText.setVisibility(TextView.GONE);
                     });
                 } catch (Exception e) { e.printStackTrace(); }
             });
+
+            mSocket.connect();
         } catch (URISyntaxException e) { e.printStackTrace(); }
 
         imageView.setOnTouchListener((v, event) -> {
             if (event.getAction() == MotionEvent.ACTION_DOWN) {
                 float viewWidth = imageView.getWidth();
                 float viewHeight = imageView.getHeight();
-                
+                if(viewWidth == 0 || viewHeight == 0) return true; // Prevent divide by zero
+
                 float xRatio = hostWidth / viewWidth;
                 float yRatio = hostHeight / viewHeight;
                 

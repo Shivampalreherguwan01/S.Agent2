@@ -23,14 +23,12 @@ public class HostActivity extends AppCompatActivity {
     private static final int REQUEST_CODE_SCREEN_CAPTURE = 1;
     private Socket mSocket;
     private String roomId;
-    private SharedPreferences prefs;
     private TextView statusText;
-    private Button btnShare;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        prefs = getSharedPreferences("SAgentPrefs", Context.MODE_PRIVATE);
+        SharedPreferences prefs = getSharedPreferences("SAgentPrefs", Context.MODE_PRIVATE);
         
         roomId = prefs.getString("roomId", null);
         if (roomId == null) {
@@ -49,30 +47,25 @@ public class HostActivity extends AppCompatActivity {
         title.setTextColor(Color.WHITE);
         title.setTextSize(28);
         
-        TextView codeLabel = new TextView(this);
-        codeLabel.setText("Your Pairing Code:");
-        codeLabel.setTextColor(Color.LTGRAY);
-        codeLabel.setTextSize(18);
-        codeLabel.setPadding(0, 50, 0, 10);
-
         TextView tvCode = new TextView(this);
-        tvCode.setText(roomId);
+        tvCode.setText("Code:\n" + roomId);
         tvCode.setTextColor(Color.parseColor("#00E676"));
         tvCode.setTextSize(36);
         tvCode.setGravity(Gravity.CENTER);
+        tvCode.setPadding(0, 30, 0, 30);
 
         statusText = new TextView(this);
-        statusText.setText("Connecting to Server... (Please wait 30s if sleeping)");
+        statusText.setText("Connecting to Server...\n(Please wait, Render server takes 50s to wake up)");
         statusText.setTextColor(Color.YELLOW);
         statusText.setTextSize(16);
         statusText.setGravity(Gravity.CENTER);
-        statusText.setPadding(0, 50, 0, 50);
+        statusText.setPadding(0, 20, 0, 40);
 
         Button btnAccess = new Button(this);
         btnAccess.setText("1. Enable Accessibility");
         btnAccess.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
 
-        btnShare = new Button(this);
+        Button btnShare = new Button(this);
         btnShare.setText("2. Share Screen & Connect");
         btnShare.setOnClickListener(v -> {
             MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
@@ -80,7 +73,6 @@ public class HostActivity extends AppCompatActivity {
         });
 
         layout.addView(title);
-        layout.addView(codeLabel);
         layout.addView(tvCode);
         layout.addView(statusText);
         layout.addView(btnAccess);
@@ -93,22 +85,35 @@ public class HostActivity extends AppCompatActivity {
     private void connectSocket() {
         try {
             mSocket = IO.socket(MainActivity.SERVER_URL);
-            mSocket.connect();
+            
             mSocket.on(Socket.EVENT_CONNECT, args -> {
                 mSocket.emit("join-as-host", roomId);
                 runOnUiThread(() -> {
-                    statusText.setText("Server Connected. Waiting for Controller...");
+                    statusText.setText("✅ SERVER CONNECTED!\nWaiting for Controller to enter code...");
                     statusText.setTextColor(Color.GREEN);
                 });
             });
             
-            // Jab controller connect request bhejega
+            mSocket.on(Socket.EVENT_CONNECT_ERROR, args -> {
+                runOnUiThread(() -> {
+                    statusText.setText("❌ SERVER ERROR!\nCheck your internet or Render Server.");
+                    statusText.setTextColor(Color.RED);
+                });
+            });
+            
+            mSocket.on(Socket.EVENT_DISCONNECT, args -> {
+                runOnUiThread(() -> {
+                    statusText.setText("⚠️ Disconnected from Server.\nReconnecting...");
+                    statusText.setTextColor(Color.RED);
+                });
+            });
+
             mSocket.on("controller-requested", args -> {
                 runOnUiThread(() -> {
-                    statusText.setText("Controller Connected! Streaming...");
-                    Toast.makeText(HostActivity.this, "A device connected to you!", Toast.LENGTH_SHORT).show();
+                    statusText.setText("📱 CONTROLLER CONNECTED!\nScreen streaming started.");
+                    statusText.setTextColor(Color.CYAN);
+                    Toast.makeText(HostActivity.this, "Device Connected!", Toast.LENGTH_SHORT).show();
                     try {
-                        // FIX: Data ko JSON Object format mein bhejna tha
                         JSONObject obj = new JSONObject();
                         obj.put("roomId", roomId);
                         mSocket.emit("accept-connect", obj); 
@@ -116,6 +121,7 @@ public class HostActivity extends AppCompatActivity {
                 });
             });
 
+            mSocket.connect();
         } catch (URISyntaxException e) { e.printStackTrace(); }
     }
 
