@@ -21,7 +21,8 @@ public class LiveControlActivity extends AppCompatActivity {
     private String roomId;
     private ImageView imageView;
     private TextView statusText;
-    private float hostWidth = 540f, hostHeight = 960f;
+    private float hostWidth = 360f, hostHeight = 640f;
+    private int frameCount = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -35,8 +36,8 @@ public class LiveControlActivity extends AppCompatActivity {
         imageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
         
         statusText = new TextView(this);
-        statusText.setText("Connecting to Server...\n(Please wait 50s for server to wake up)");
-        statusText.setTextColor(Color.YELLOW);
+        statusText.setText("Connected! Waiting for Screen Data...");
+        statusText.setTextColor(Color.CYAN);
         statusText.setTextSize(18);
         statusText.setPadding(30, 30, 30, 30);
 
@@ -55,16 +56,9 @@ public class LiveControlActivity extends AppCompatActivity {
                 });
             });
 
-            mSocket.on(Socket.EVENT_CONNECT_ERROR, args -> {
-                runOnUiThread(() -> {
-                    statusText.setText("❌ Server Error!\nCheck Internet.");
-                    statusText.setTextColor(Color.RED);
-                });
-            });
-
             mSocket.on("connection-accepted", args -> {
                 runOnUiThread(() -> {
-                    statusText.setText("⏳ Connected! Waiting for Screen...");
+                    statusText.setText("⏳ Host Accepted! Waiting for Data...");
                     statusText.setTextColor(Color.CYAN);
                 });
             });
@@ -79,9 +73,13 @@ public class LiveControlActivity extends AppCompatActivity {
                     byte[] decodedString = Base64.decode(base64, Base64.DEFAULT);
                     Bitmap decodedByte = BitmapFactory.decodeByteArray(decodedString, 0, decodedString.length);
                     
+                    frameCount++;
                     runOnUiThread(() -> {
                         imageView.setImageBitmap(decodedByte);
-                        statusText.setVisibility(TextView.GONE);
+                        // Agar frame aa gaya toh text hide kar do
+                        if(frameCount > 1) {
+                            statusText.setVisibility(TextView.GONE);
+                        }
                     });
                 } catch (Exception e) { e.printStackTrace(); }
             });
@@ -93,7 +91,7 @@ public class LiveControlActivity extends AppCompatActivity {
             if (event.getAction() == MotionEvent.ACTION_DOWN) {
                 float viewWidth = imageView.getWidth();
                 float viewHeight = imageView.getHeight();
-                if(viewWidth == 0 || viewHeight == 0) return true; // Prevent divide by zero
+                if(viewWidth == 0 || viewHeight == 0) return true;
 
                 float xRatio = hostWidth / viewWidth;
                 float yRatio = hostHeight / viewHeight;

@@ -32,6 +32,7 @@ public class ScreenCaptureService extends Service {
     private ImageReader imageReader;
     private Socket mSocket;
     private String roomId;
+    private long lastFrameTime = 0; // FPS control ke liye
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
@@ -72,8 +73,9 @@ public class ScreenCaptureService extends Service {
         DisplayMetrics metrics = new DisplayMetrics();
         wm.getDefaultDisplay().getMetrics(metrics);
         
-        int width = 540; 
-        int height = 960;
+        // Resolution aur Quality kam kar di taaki Render server crash na ho
+        int width = 360; 
+        int height = 640;
         int density = metrics.densityDpi;
 
         imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2);
@@ -87,6 +89,14 @@ public class ScreenCaptureService extends Service {
             try {
                 image = reader.acquireLatestImage();
                 if (image != null) {
+                    long currentTime = System.currentTimeMillis();
+                    // FPS LIMIT: Har 400ms (approx 2.5 FPS) mein hi frame bhejenge
+                    if (currentTime - lastFrameTime < 400) {
+                        image.close();
+                        return;
+                    }
+                    lastFrameTime = currentTime;
+
                     Image.Plane[] planes = image.getPlanes();
                     ByteBuffer buffer = planes[0].getBuffer();
                     int pixelStride = planes[0].getPixelStride();
@@ -97,7 +107,7 @@ public class ScreenCaptureService extends Service {
                     bitmap.copyPixelsFromBuffer(buffer);
 
                     ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 30, baos);
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 20, baos); // Quality 20%
                     byte[] byteArray = baos.toByteArray();
                     String base64Image = Base64.encodeToString(byteArray, Base64.DEFAULT);
 
