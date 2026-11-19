@@ -41,6 +41,6 @@ dependencies {
     implementation ('io.socket:socket.io-client:2.1.0') {
         exclude group: 'org.json', module: 'json'
     }
-    // WebRTC Library
-    implementation 'io.github.webrtc-sdk:android:104.5112'
+    // WebRTC Library - Fixed Version
+    implementation 'io.github.webrtc-sdk:android:104.5112.07' 
 }
