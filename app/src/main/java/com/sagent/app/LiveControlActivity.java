@@ -36,7 +36,7 @@ public class LiveControlActivity extends AppCompatActivity {
         imageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
         
         statusText = new TextView(this);
-        statusText.setText("Connecting...");
+        statusText.setText("Waking up server...\nPlease wait up to 60 seconds.");
         statusText.setTextColor(Color.WHITE);
         statusText.setTextSize(18);
         statusText.setPadding(30, 30, 30, 30);
@@ -49,13 +49,23 @@ public class LiveControlActivity extends AppCompatActivity {
             mSocket = IO.socket(MainActivity.SERVER_URL);
             mSocket.connect();
             
+            // Agar pehle se connected hai
+            if (mSocket.connected()) {
+                mSocket.emit("request-connect", roomId);
+                runOnUiThread(() -> statusText.setText("Requesting Host to connect..."));
+            }
+
             mSocket.on(Socket.EVENT_CONNECT, args -> {
                 mSocket.emit("request-connect", roomId);
-                runOnUiThread(() -> statusText.setText("Requesting Connection..."));
+                runOnUiThread(() -> statusText.setText("Requesting Host to connect..."));
+            });
+
+            mSocket.on(Socket.EVENT_CONNECT_ERROR, args -> {
+                runOnUiThread(() -> statusText.setText("Server Error. Please restart App."));
             });
 
             mSocket.on("connection-accepted", args -> {
-                runOnUiThread(() -> statusText.setText("Connected!"));
+                runOnUiThread(() -> statusText.setText("Connected! Waiting for screen data..."));
             });
 
             mSocket.on("receive-screen", args -> {
@@ -70,7 +80,7 @@ public class LiveControlActivity extends AppCompatActivity {
                     
                     runOnUiThread(() -> {
                         imageView.setImageBitmap(decodedByte);
-                        statusText.setVisibility(TextView.GONE);
+                        statusText.setVisibility(TextView.GONE); // Screen aate hi text hata do
                     });
                 } catch (Exception e) { e.printStackTrace(); }
             });
@@ -81,7 +91,6 @@ public class LiveControlActivity extends AppCompatActivity {
                 float viewWidth = imageView.getWidth();
                 float viewHeight = imageView.getHeight();
                 
-                // Screen size ke hisab se touch calculate karna
                 float xRatio = hostWidth / viewWidth;
                 float yRatio = hostHeight / viewHeight;
                 

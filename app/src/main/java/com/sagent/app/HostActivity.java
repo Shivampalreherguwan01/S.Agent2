@@ -17,6 +17,7 @@ import java.net.URISyntaxException;
 import java.util.Random;
 import io.socket.client.IO;
 import io.socket.client.Socket;
+import org.json.JSONObject;
 
 public class HostActivity extends AppCompatActivity {
     private static final int REQUEST_CODE_SCREEN_CAPTURE = 1;
@@ -56,14 +57,15 @@ public class HostActivity extends AppCompatActivity {
 
         TextView tvCode = new TextView(this);
         tvCode.setText(roomId);
-        tvCode.setTextColor(Color.parseColor("#00E676")); // Green
+        tvCode.setTextColor(Color.parseColor("#00E676"));
         tvCode.setTextSize(36);
         tvCode.setGravity(Gravity.CENTER);
 
         statusText = new TextView(this);
-        statusText.setText("Waiting for Controller...");
+        statusText.setText("Connecting to Server... (Please wait 30s if sleeping)");
         statusText.setTextColor(Color.YELLOW);
-        statusText.setTextSize(18);
+        statusText.setTextSize(16);
+        statusText.setGravity(Gravity.CENTER);
         statusText.setPadding(0, 50, 0, 50);
 
         Button btnAccess = new Button(this);
@@ -94,17 +96,23 @@ public class HostActivity extends AppCompatActivity {
             mSocket.connect();
             mSocket.on(Socket.EVENT_CONNECT, args -> {
                 mSocket.emit("join-as-host", roomId);
-                runOnUiThread(() -> statusText.setText("Server Connected. Waiting..."));
+                runOnUiThread(() -> {
+                    statusText.setText("Server Connected. Waiting for Controller...");
+                    statusText.setTextColor(Color.GREEN);
+                });
             });
             
             // Jab controller connect request bhejega
             mSocket.on("controller-requested", args -> {
                 runOnUiThread(() -> {
-                    statusText.setText("Controller Connected!");
-                    statusText.setTextColor(Color.GREEN);
+                    statusText.setText("Controller Connected! Streaming...");
                     Toast.makeText(HostActivity.this, "A device connected to you!", Toast.LENGTH_SHORT).show();
-                    // Yahan hum auto accept kar rahe hain
-                    mSocket.emit("accept-connect", roomId); 
+                    try {
+                        // FIX: Data ko JSON Object format mein bhejna tha
+                        JSONObject obj = new JSONObject();
+                        obj.put("roomId", roomId);
+                        mSocket.emit("accept-connect", obj); 
+                    } catch (Exception e) { e.printStackTrace(); }
                 });
             });
 
