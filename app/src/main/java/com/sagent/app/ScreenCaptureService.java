@@ -50,19 +50,30 @@ public class ScreenCaptureService extends Service {
         }
 
         int resultCode = intent.getIntExtra("resultCode", -1);
-        Intent data = intent.getParcelableExtra("data");
+        Intent data = intent.getParcelableExtra("data"); // WebRTC ko yeh Intent chahiye
         roomId = intent.getStringExtra("roomId");
 
         MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
         mediaProjection = mpm.getMediaProjection(resultCode, data);
+        
+        // MediaProjection callback register karna zaroori hai
+        if (mediaProjection != null) {
+            mediaProjection.registerCallback(new MediaProjection.Callback() {
+                @Override
+                public void onStop() {
+                    super.onStop();
+                    stopSelf();
+                }
+            }, null);
+        }
 
-        initWebRTC();
+        initWebRTC(data); // Intent pass kiya
         initSocket();
         
         return START_STICKY;
     }
 
-    private void initWebRTC() {
+    private void initWebRTC(Intent data) {
         PeerConnectionFactory.InitializationOptions initOptions = PeerConnectionFactory.InitializationOptions.builder(this).createInitializationOptions();
         PeerConnectionFactory.initialize(initOptions);
 
@@ -70,7 +81,9 @@ public class ScreenCaptureService extends Service {
         peerConnectionFactory = PeerConnectionFactory.builder().createPeerConnectionFactory();
 
         surfaceTextureHelper = SurfaceTextureHelper.create("CaptureThread", eglBase.getEglBaseContext());
-        videoCapturer = new ScreenCapturerAndroid(mediaProjection, new MediaProjection.Callback() {});
+        
+        // FIX 1: Yahan 'data' Intent pass hota hai 'mediaProjection' nahi
+        videoCapturer = new ScreenCapturerAndroid(data, new MediaProjection.Callback() {});
         
         VideoSource videoSource = peerConnectionFactory.createVideoSource(false);
         videoCapturer.initialize(surfaceTextureHelper, getApplicationContext(), videoSource.getCapturerObserver());
@@ -108,7 +121,14 @@ public class ScreenCaptureService extends Service {
         // Create Offer
         peerConnection.createOffer(new SdpObserver() {
             @Override public void onCreateSuccess(SessionDescription sessionDescription) {
-                peerConnection.setLocalDescription(new SdpObserver() {}, sessionDescription);
+                peerConnection.setLocalDescription(new SdpObserver() {
+                    @Override public void onCreateSuccess(SessionDescription sessionDescription) {}
+                    @Override public void onSetSuccess() {}
+                    @Override public void onCreateFailure(String s) {}
+                    // FIX 2: onSetFailure add kiya
+                    @Override public void onSetFailure(String s) { s.toString(); } 
+                }, sessionDescription);
+                
                 JSONObject obj = new JSONObject();
                 try {
                     obj.put("roomId", roomId);
@@ -130,7 +150,14 @@ public class ScreenCaptureService extends Service {
             mSocket.on("answer", args -> {
                 String sdp = (String) args[0];
                 SessionDescription answer = new SessionDescription(SessionDescription.Type.ANSWER, sdp);
-                peerConnection.setRemoteDescription(new SdpObserver() {}, answer);
+                peerConnection.setRemoteDescription(new SdpObserver() {
+                    @Override public void onCreateSuccess(SessionDescription sessionDescription) {}
+                    @Override public void onSetSuccess() {}
+                    @Override public void onCreateFailure(String s) {}
+                    // FIX 2: onSetFailure add kiya
+                    @Override public void onSetFailure(String s) { s.toString(); }
+                }, answer);
+                
                 for (IceCandidate candidate : iceCandidates) {
                     peerConnection.addIceCandidate(candidate);
                 }

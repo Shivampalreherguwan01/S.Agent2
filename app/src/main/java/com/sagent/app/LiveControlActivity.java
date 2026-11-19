@@ -53,7 +53,6 @@ public class LiveControlActivity extends AppCompatActivity {
                 float viewHeight = surfaceViewRenderer.getHeight();
                 if(viewWidth == 0 || viewHeight == 0) return true;
 
-                // Normalize coordinates (0.0 to 1.0) as suggested in PDF
                 float normalizedX = event.getX() / viewWidth;
                 float normalizedY = event.getY() / viewHeight;
 
@@ -123,7 +122,14 @@ public class LiveControlActivity extends AppCompatActivity {
             mSocket.on("offer", args -> {
                 String sdp = (String) args[0];
                 SessionDescription offer = new SessionDescription(SessionDescription.Type.OFFER, sdp);
-                peerConnection.setRemoteDescription(new SdpObserver() {}, offer);
+                
+                peerConnection.setRemoteDescription(new SdpObserver() {
+                    @Override public void onCreateSuccess(SessionDescription sessionDescription) {}
+                    @Override public void onSetSuccess() {}
+                    @Override public void onCreateFailure(String s) {}
+                    // FIX 2: onSetFailure add kiya
+                    @Override public void onSetFailure(String s) { s.toString(); }
+                }, offer);
                 
                 for (IceCandidate candidate : iceCandidates) {
                     peerConnection.addIceCandidate(candidate);
@@ -132,7 +138,14 @@ public class LiveControlActivity extends AppCompatActivity {
 
                 peerConnection.createAnswer(new SdpObserver() {
                     @Override public void onCreateSuccess(SessionDescription sessionDescription) {
-                        peerConnection.setLocalDescription(new SdpObserver() {}, sessionDescription);
+                        peerConnection.setLocalDescription(new SdpObserver() {
+                            @Override public void onCreateSuccess(SessionDescription sessionDescription) {}
+                            @Override public void onSetSuccess() {}
+                            @Override public void onCreateFailure(String s) {}
+                            // FIX 2: onSetFailure add kiya
+                            @Override public void onSetFailure(String s) { s.toString(); }
+                        }, sessionDescription);
+                        
                         JSONObject obj = new JSONObject();
                         try {
                             obj.put("roomId", roomId);
