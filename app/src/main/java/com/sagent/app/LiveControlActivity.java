@@ -79,6 +79,7 @@ public class LiveControlActivity extends AppCompatActivity {
 
         List<PeerConnection.IceServer> iceServers = new ArrayList<>();
         iceServers.add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer());
+        iceServers.add(PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer());
 
         PeerConnection.RTCConfiguration rtcConfig = new PeerConnection.RTCConfiguration(iceServers);
         peerConnection = peerConnectionFactory.createPeerConnection(rtcConfig, new PeerConnection.Observer() {
@@ -117,7 +118,12 @@ public class LiveControlActivity extends AppCompatActivity {
     private void initSocket() {
         try {
             mSocket = IO.socket(MainActivity.SERVER_URL);
-            mSocket.on(Socket.EVENT_CONNECT, args -> mSocket.emit("join", roomId));
+            
+            // Connect hote hi Server ko batayenge ki Controller aa gaya
+            mSocket.on(Socket.EVENT_CONNECT, args -> {
+                mSocket.emit("join", roomId);
+                mSocket.emit("request-connect", roomId);
+            });
 
             mSocket.on("offer", args -> {
                 String sdp = (String) args[0];
@@ -127,7 +133,6 @@ public class LiveControlActivity extends AppCompatActivity {
                     @Override public void onCreateSuccess(SessionDescription sessionDescription) {}
                     @Override public void onSetSuccess() {}
                     @Override public void onCreateFailure(String s) {}
-                    // FIX 2: onSetFailure add kiya
                     @Override public void onSetFailure(String s) { s.toString(); }
                 }, offer);
                 
@@ -142,7 +147,6 @@ public class LiveControlActivity extends AppCompatActivity {
                             @Override public void onCreateSuccess(SessionDescription sessionDescription) {}
                             @Override public void onSetSuccess() {}
                             @Override public void onCreateFailure(String s) {}
-                            // FIX 2: onSetFailure add kiya
                             @Override public void onSetFailure(String s) { s.toString(); }
                         }, sessionDescription);
                         

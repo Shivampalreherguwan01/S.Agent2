@@ -16,18 +16,12 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
-import java.net.URISyntaxException;
 import java.util.Random;
-import io.socket.client.IO;
-import io.socket.client.Socket;
-import org.json.JSONObject;
 
 public class HostActivity extends AppCompatActivity {
     private static final int REQUEST_CODE_SCREEN_CAPTURE = 1;
     private static final int REQUEST_CODE_NOTIFICATION = 2;
-    private Socket mSocket;
     private String roomId;
-    private TextView statusText;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -64,19 +58,12 @@ public class HostActivity extends AppCompatActivity {
         tvCode.setGravity(Gravity.CENTER);
         tvCode.setPadding(0, 30, 0, 30);
 
-        statusText = new TextView(this);
-        statusText.setText("Connecting to Server...");
-        statusText.setTextColor(Color.YELLOW);
-        statusText.setTextSize(16);
-        statusText.setGravity(Gravity.CENTER);
-        statusText.setPadding(0, 20, 0, 40);
-
         Button btnAccess = new Button(this);
-        btnAccess.setText("1. Enable Accessibility");
+        btnAccess.setText("1. ENABLE ACCESSIBILITY");
         btnAccess.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
 
         Button btnShare = new Button(this);
-        btnShare.setText("2. Share Screen & Connect");
+        btnShare.setText("2. SHARE SCREEN & CONNECT");
         btnShare.setOnClickListener(v -> {
             MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
             startActivityForResult(mpm.createScreenCaptureIntent(), REQUEST_CODE_SCREEN_CAPTURE);
@@ -84,26 +71,9 @@ public class HostActivity extends AppCompatActivity {
 
         layout.addView(title);
         layout.addView(tvCode);
-        layout.addView(statusText);
         layout.addView(btnAccess);
         layout.addView(btnShare);
         setContentView(layout);
-
-        connectSocket();
-    }
-
-    private void connectSocket() {
-        try {
-            mSocket = IO.socket(MainActivity.SERVER_URL);
-            mSocket.on(Socket.EVENT_CONNECT, args -> {
-                mSocket.emit("join", roomId);
-                runOnUiThread(() -> {
-                    statusText.setText("✅ SERVER CONNECTED!\nWaiting for Controller...");
-                    statusText.setTextColor(Color.GREEN);
-                });
-            });
-            mSocket.connect();
-        } catch (URISyntaxException e) { e.printStackTrace(); }
     }
 
     @Override

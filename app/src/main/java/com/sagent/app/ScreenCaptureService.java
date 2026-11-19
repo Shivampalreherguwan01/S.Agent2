@@ -50,13 +50,12 @@ public class ScreenCaptureService extends Service {
         }
 
         int resultCode = intent.getIntExtra("resultCode", -1);
-        Intent data = intent.getParcelableExtra("data"); // WebRTC ko yeh Intent chahiye
+        Intent data = intent.getParcelableExtra("data");
         roomId = intent.getStringExtra("roomId");
 
         MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
         mediaProjection = mpm.getMediaProjection(resultCode, data);
         
-        // MediaProjection callback register karna zaroori hai
         if (mediaProjection != null) {
             mediaProjection.registerCallback(new MediaProjection.Callback() {
                 @Override
@@ -67,7 +66,7 @@ public class ScreenCaptureService extends Service {
             }, null);
         }
 
-        initWebRTC(data); // Intent pass kiya
+        initWebRTC(data);
         initSocket();
         
         return START_STICKY;
@@ -81,8 +80,6 @@ public class ScreenCaptureService extends Service {
         peerConnectionFactory = PeerConnectionFactory.builder().createPeerConnectionFactory();
 
         surfaceTextureHelper = SurfaceTextureHelper.create("CaptureThread", eglBase.getEglBaseContext());
-        
-        // FIX 1: Yahan 'data' Intent pass hota hai 'mediaProjection' nahi
         videoCapturer = new ScreenCapturerAndroid(data, new MediaProjection.Callback() {});
         
         VideoSource videoSource = peerConnectionFactory.createVideoSource(false);
@@ -93,6 +90,7 @@ public class ScreenCaptureService extends Service {
 
         List<PeerConnection.IceServer> iceServers = new ArrayList<>();
         iceServers.add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer());
+        iceServers.add(PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer());
 
         PeerConnection.RTCConfiguration rtcConfig = new PeerConnection.RTCConfiguration(iceServers);
         peerConnection = peerConnectionFactory.createPeerConnection(rtcConfig, new PeerConnection.Observer() {
@@ -105,7 +103,7 @@ public class ScreenCaptureService extends Service {
                 try {
                     obj.put("roomId", roomId);
                     obj.put("candidate", iceCandidate.sdp);
-                    mSocket.emit("ice-candidate", obj);
+                    if(mSocket != null) mSocket.emit("ice-candidate", obj);
                 } catch (JSONException e) { e.printStackTrace(); }
             }
             @Override public void onIceCandidatesRemoved(IceCandidate[] iceCandidates) {}
@@ -117,15 +115,16 @@ public class ScreenCaptureService extends Service {
         });
 
         peerConnection.addTrack(localVideoTrack);
+        // REMOVED immediate createOffer() from here
+    }
 
-        // Create Offer
+    private void createOffer() {
         peerConnection.createOffer(new SdpObserver() {
             @Override public void onCreateSuccess(SessionDescription sessionDescription) {
                 peerConnection.setLocalDescription(new SdpObserver() {
                     @Override public void onCreateSuccess(SessionDescription sessionDescription) {}
                     @Override public void onSetSuccess() {}
                     @Override public void onCreateFailure(String s) {}
-                    // FIX 2: onSetFailure add kiya
                     @Override public void onSetFailure(String s) { s.toString(); } 
                 }, sessionDescription);
                 
@@ -147,6 +146,9 @@ public class ScreenCaptureService extends Service {
             mSocket = IO.socket(MainActivity.SERVER_URL);
             mSocket.on(Socket.EVENT_CONNECT, args -> mSocket.emit("join", roomId));
             
+            // Jab controller room mein aayega tab Offer banega
+            mSocket.on("controller-joined", args -> createOffer());
+            
             mSocket.on("answer", args -> {
                 String sdp = (String) args[0];
                 SessionDescription answer = new SessionDescription(SessionDescription.Type.ANSWER, sdp);
@@ -154,7 +156,6 @@ public class ScreenCaptureService extends Service {
                     @Override public void onCreateSuccess(SessionDescription sessionDescription) {}
                     @Override public void onSetSuccess() {}
                     @Override public void onCreateFailure(String s) {}
-                    // FIX 2: onSetFailure add kiya
                     @Override public void onSetFailure(String s) { s.toString(); }
                 }, answer);
                 
