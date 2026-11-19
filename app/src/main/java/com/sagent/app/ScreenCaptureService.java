@@ -6,56 +6,42 @@ import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
-import android.graphics.Bitmap;
-import android.graphics.PixelFormat;
-import android.hardware.display.DisplayManager;
-import android.hardware.display.VirtualDisplay;
-import android.media.Image;
-import android.media.ImageReader;
 import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
 import android.os.Build;
-import android.os.Handler;
-import android.os.HandlerThread;
 import android.os.IBinder;
-import android.os.Looper;
-import android.util.Base64;
-import android.util.DisplayMetrics;
-import android.view.WindowManager;
-import android.widget.Toast;
 import androidx.annotation.Nullable;
-import java.io.ByteArrayOutputStream;
+import org.json.JSONException;
+import org.json.JSONObject;
+import org.webrtc.*;
 import java.net.URISyntaxException;
-import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.List;
 import io.socket.client.IO;
 import io.socket.client.Socket;
-import org.json.JSONObject;
 
 public class ScreenCaptureService extends Service {
-    private MediaProjection mediaProjection;
-    private VirtualDisplay virtualDisplay;
-    private ImageReader imageReader;
     private Socket mSocket;
     private String roomId;
-    private long lastFrameTime = 0;
-    private HandlerThread backgroundThread;
-    private Handler backgroundHandler;
+    private MediaProjection mediaProjection;
+    private PeerConnectionFactory peerConnectionFactory;
+    private PeerConnection peerConnection;
+    private VideoCapturer videoCapturer;
+    private VideoTrack localVideoTrack;
+    private SurfaceTextureHelper surfaceTextureHelper;
+    private EglBase eglBase;
+    private final List<IceCandidate> iceCandidates = new ArrayList<>();
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        showToast("Service Started!");
-        
-        // Android 14 ke liye Foreground Service start karna zaroori hai
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel("sagent", "S.Agent2", NotificationManager.IMPORTANCE_LOW);
             NotificationManager manager = getSystemService(NotificationManager.class);
             manager.createNotificationChannel(channel);
             Notification notification = new Notification.Builder(this, "sagent")
-                    .setContentTitle("S.Agent2 Running")
-                    .setContentText("Screen streaming is active")
+                    .setContentTitle("S.Agent2 Host Running")
                     .setSmallIcon(android.R.drawable.ic_menu_camera)
                     .build();
-            
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
             } else {
@@ -67,124 +53,114 @@ public class ScreenCaptureService extends Service {
         Intent data = intent.getParcelableExtra("data");
         roomId = intent.getStringExtra("roomId");
 
-        // Background Thread banayein taaki main thread block na ho
-        backgroundThread = new HandlerThread("ScreenCaptureThread");
-        backgroundThread.start();
-        backgroundHandler = new Handler(backgroundThread.getLooper());
+        MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
+        mediaProjection = mpm.getMediaProjection(resultCode, data);
 
-        try {
-            mSocket = IO.socket(MainActivity.SERVER_URL);
-            mSocket.connect();
-            mSocket.on(Socket.EVENT_CONNECT, args -> {
-                mSocket.emit("join-as-host", roomId);
-            });
-        } catch (URISyntaxException e) { e.printStackTrace(); }
-
-        if (resultCode != -1 && data != null) {
-            MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
-            mediaProjection = mpm.getMediaProjection(resultCode, data);
-            if (mediaProjection != null) {
-                // Android 14 ke liye Callback register karna anivarya hai
-                mediaProjection.registerCallback(new MediaProjection.Callback() {
-                    @Override
-                    public void onStop() {
-                        super.onStop();
-                        stopSelf();
-                    }
-                }, backgroundHandler);
-                
-                startScreenCapture();
-            } else {
-                showToast("MediaProjection Failed!");
-            }
-        }
+        initWebRTC();
+        initSocket();
+        
         return START_STICKY;
     }
 
-    private void startScreenCapture() {
-        backgroundHandler.post(() -> {
-            try {
-                WindowManager wm = (WindowManager) getSystemService(WINDOW_SERVICE);
-                DisplayMetrics metrics = new DisplayMetrics();
-                wm.getDefaultDisplay().getMetrics(metrics);
-                
-                int width = 360; 
-                int height = 640;
-                int density = metrics.densityDpi;
+    private void initWebRTC() {
+        PeerConnectionFactory.InitializationOptions initOptions = PeerConnectionFactory.InitializationOptions.builder(this).createInitializationOptions();
+        PeerConnectionFactory.initialize(initOptions);
 
-                imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2);
-                virtualDisplay = mediaProjection.createVirtualDisplay("S.Agent2",
-                        width, height, density,
-                        DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                        imageReader.getSurface(), null, backgroundHandler);
+        eglBase = EglBase.create();
+        peerConnectionFactory = PeerConnectionFactory.builder().createPeerConnectionFactory();
 
-                imageReader.setOnImageAvailableListener(reader -> {
-                    Image image = null;
-                    try {
-                        image = reader.acquireLatestImage();
-                        if (image != null) {
-                            long currentTime = System.currentTimeMillis();
-                            if (currentTime - lastFrameTime < 400) {
-                                image.close();
-                                return;
-                            }
-                            lastFrameTime = currentTime;
+        surfaceTextureHelper = SurfaceTextureHelper.create("CaptureThread", eglBase.getEglBaseContext());
+        videoCapturer = new ScreenCapturerAndroid(mediaProjection, new MediaProjection.Callback() {});
+        
+        VideoSource videoSource = peerConnectionFactory.createVideoSource(false);
+        videoCapturer.initialize(surfaceTextureHelper, getApplicationContext(), videoSource.getCapturerObserver());
+        videoCapturer.startCapture(540, 960, 30);
 
-                            Image.Plane[] planes = image.getPlanes();
-                            ByteBuffer buffer = planes[0].getBuffer();
-                            int pixelStride = planes[0].getPixelStride();
-                            int rowStride = planes[0].getRowStride();
-                            int rowPadding = rowStride - pixelStride * width;
-                            
-                            Bitmap bitmap = Bitmap.createBitmap(width + rowPadding / pixelStride, height, Bitmap.Config.ARGB_8888);
-                            bitmap.copyPixelsFromBuffer(buffer);
+        localVideoTrack = peerConnectionFactory.createVideoTrack("VIDEO_TRACK", videoSource);
 
-                            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                            bitmap.compress(Bitmap.CompressFormat.JPEG, 20, baos);
-                            byte[] byteArray = baos.toByteArray();
-                            String base64Image = Base64.encodeToString(byteArray, Base64.DEFAULT);
+        List<PeerConnection.IceServer> iceServers = new ArrayList<>();
+        iceServers.add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer());
 
-                            JSONObject data = new JSONObject();
-                            data.put("roomId", roomId);
-                            data.put("image", base64Image);
-                            data.put("width", width);
-                            data.put("height", height);
-                            
-                            if (mSocket != null && mSocket.connected()) {
-                                mSocket.emit("screen-frame", data);
-                                // Agar aapko check karna hai ki frame ja raha hai, toh is line ko uncomment karein
-                                // showToast("Frame Sent: " + currentTime); 
-                            }
-                            bitmap.recycle();
-                        }
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                    } finally {
-                        if (image != null) image.close();
-                    }
-                }, backgroundHandler);
-                
-            } catch (Exception e) {
-                showToast("Error starting capture: " + e.getMessage());
+        PeerConnection.RTCConfiguration rtcConfig = new PeerConnection.RTCConfiguration(iceServers);
+        peerConnection = peerConnectionFactory.createPeerConnection(rtcConfig, new PeerConnection.Observer() {
+            @Override public void onSignalingChange(PeerConnection.SignalingState signalingState) {}
+            @Override public void onIceConnectionChange(PeerConnection.IceConnectionState iceConnectionState) {}
+            @Override public void onIceConnectionReceivingChange(boolean b) {}
+            @Override public void onIceGatheringChange(PeerConnection.IceGatheringState iceGatheringState) {}
+            @Override public void onIceCandidate(IceCandidate iceCandidate) {
+                JSONObject obj = new JSONObject();
+                try {
+                    obj.put("roomId", roomId);
+                    obj.put("candidate", iceCandidate.sdp);
+                    mSocket.emit("ice-candidate", obj);
+                } catch (JSONException e) { e.printStackTrace(); }
             }
+            @Override public void onIceCandidatesRemoved(IceCandidate[] iceCandidates) {}
+            @Override public void onAddStream(MediaStream mediaStream) {}
+            @Override public void onRemoveStream(MediaStream mediaStream) {}
+            @Override public void onDataChannel(DataChannel dataChannel) {}
+            @Override public void onRenegotiationNeeded() {}
+            @Override public void onAddTrack(RtpReceiver rtpReceiver, MediaStream[] mediaStreams) {}
         });
+
+        peerConnection.addTrack(localVideoTrack);
+
+        // Create Offer
+        peerConnection.createOffer(new SdpObserver() {
+            @Override public void onCreateSuccess(SessionDescription sessionDescription) {
+                peerConnection.setLocalDescription(new SdpObserver() {}, sessionDescription);
+                JSONObject obj = new JSONObject();
+                try {
+                    obj.put("roomId", roomId);
+                    obj.put("sdp", sessionDescription.description);
+                    mSocket.emit("offer", obj);
+                } catch (JSONException e) { e.printStackTrace(); }
+            }
+            @Override public void onSetSuccess() {}
+            @Override public void onCreateFailure(String s) {}
+            @Override public void onSetFailure(String s) {}
+        }, new MediaConstraints());
     }
 
-    private void showToast(String msg) {
-        new Handler(Looper.getMainLooper()).post(() -> Toast.makeText(getApplicationContext(), msg, Toast.LENGTH_SHORT).show());
+    private void initSocket() {
+        try {
+            mSocket = IO.socket(MainActivity.SERVER_URL);
+            mSocket.on(Socket.EVENT_CONNECT, args -> mSocket.emit("join", roomId));
+            
+            mSocket.on("answer", args -> {
+                String sdp = (String) args[0];
+                SessionDescription answer = new SessionDescription(SessionDescription.Type.ANSWER, sdp);
+                peerConnection.setRemoteDescription(new SdpObserver() {}, answer);
+                for (IceCandidate candidate : iceCandidates) {
+                    peerConnection.addIceCandidate(candidate);
+                }
+                iceCandidates.clear();
+            });
+
+            mSocket.on("ice-candidate", args -> {
+                String sdp = (String) args[0];
+                IceCandidate candidate = new IceCandidate("0", 0, sdp);
+                if (peerConnection.getRemoteDescription() != null) {
+                    peerConnection.addIceCandidate(candidate);
+                } else {
+                    iceCandidates.add(candidate);
+                }
+            });
+
+            mSocket.connect();
+        } catch (URISyntaxException e) { e.printStackTrace(); }
     }
 
     @Override
     public void onDestroy() {
-        if (virtualDisplay != null) virtualDisplay.release();
-        if (imageReader != null) imageReader.close();
-        if (mediaProjection != null) mediaProjection.stop();
-        if (mSocket != null) mSocket.disconnect();
-        if (backgroundThread != null) backgroundThread.quitSafely();
+        try {
+            if (videoCapturer != null) videoCapturer.stopCapture();
+            if (peerConnection != null) peerConnection.close();
+            if (mSocket != null) mSocket.disconnect();
+            if (eglBase != null) eglBase.release();
+        } catch (Exception e) { e.printStackTrace(); }
         super.onDestroy();
     }
 
-    @Nullable
-    @Override
-    public IBinder onBind(Intent intent) { return null; }
+    @Nullable @Override public IBinder onBind(Intent intent) { return null; }
 }

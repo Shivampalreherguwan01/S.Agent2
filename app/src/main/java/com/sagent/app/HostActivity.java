@@ -15,9 +15,7 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
-import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.core.app.ActivityCompat;
 import java.net.URISyntaxException;
 import java.util.Random;
 import io.socket.client.IO;
@@ -42,7 +40,6 @@ public class HostActivity extends AppCompatActivity {
             prefs.edit().putString("roomId", roomId).apply();
         }
 
-        // Notification Permission Request (Android 13+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                 requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQUEST_CODE_NOTIFICATION);
@@ -98,28 +95,13 @@ public class HostActivity extends AppCompatActivity {
     private void connectSocket() {
         try {
             mSocket = IO.socket(MainActivity.SERVER_URL);
-            
             mSocket.on(Socket.EVENT_CONNECT, args -> {
-                mSocket.emit("join-as-host", roomId);
+                mSocket.emit("join", roomId);
                 runOnUiThread(() -> {
                     statusText.setText("✅ SERVER CONNECTED!\nWaiting for Controller...");
                     statusText.setTextColor(Color.GREEN);
                 });
             });
-            
-            mSocket.on("controller-requested", args -> {
-                runOnUiThread(() -> {
-                    statusText.setText("📱 CONTROLLER CONNECTED!\nScreen streaming started.");
-                    statusText.setTextColor(Color.CYAN);
-                    Toast.makeText(HostActivity.this, "Device Connected!", Toast.LENGTH_SHORT).show();
-                    try {
-                        JSONObject obj = new JSONObject();
-                        obj.put("roomId", roomId);
-                        mSocket.emit("accept-connect", obj); 
-                    } catch (Exception e) { e.printStackTrace(); }
-                });
-            });
-
             mSocket.connect();
         } catch (URISyntaxException e) { e.printStackTrace(); }
     }
@@ -128,7 +110,7 @@ public class HostActivity extends AppCompatActivity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == REQUEST_CODE_SCREEN_CAPTURE && resultCode == RESULT_OK) {
-            Toast.makeText(this, "Permission Granted! Starting Service...", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Starting WebRTC Stream...", Toast.LENGTH_SHORT).show();
             Intent serviceIntent = new Intent(this, ScreenCaptureService.class);
             serviceIntent.putExtra("resultCode", resultCode);
             serviceIntent.putExtra("data", data);
@@ -138,8 +120,6 @@ public class HostActivity extends AppCompatActivity {
             } else {
                 startService(serviceIntent);
             }
-        } else {
-            Toast.makeText(this, "Screen Capture Permission Denied!", Toast.LENGTH_LONG).show();
         }
     }
 }

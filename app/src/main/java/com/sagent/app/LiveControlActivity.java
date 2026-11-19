@@ -1,28 +1,29 @@
 package com.sagent.app;
 
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.os.Bundle;
-import android.util.Base64;
 import android.view.MotionEvent;
 import android.widget.FrameLayout;
-import android.widget.ImageView;
 import android.widget.TextView;
 import androidx.appcompat.app.AppCompatActivity;
-import java.net.URISyntaxException;
-import io.socket.client.IO;
-import io.socket.client.Socket;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.webrtc.*;
+import java.net.URISyntaxException;
+import java.util.ArrayList;
+import java.util.List;
+import io.socket.client.IO;
+import io.socket.client.Socket;
 
 public class LiveControlActivity extends AppCompatActivity {
     private Socket mSocket;
     private String roomId;
-    private ImageView imageView;
     private TextView statusText;
-    private float hostWidth = 360f, hostHeight = 640f;
-    private int frameCount = 0;
+    private SurfaceViewRenderer surfaceViewRenderer;
+    private PeerConnectionFactory peerConnectionFactory;
+    private PeerConnection peerConnection;
+    private EglBase eglBase;
+    private final List<IceCandidate> iceCandidates = new ArrayList<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -32,70 +33,138 @@ public class LiveControlActivity extends AppCompatActivity {
         FrameLayout layout = new FrameLayout(this);
         layout.setBackgroundColor(Color.BLACK);
 
-        imageView = new ImageView(this);
-        imageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        
+        surfaceViewRenderer = new SurfaceViewRenderer(this);
         statusText = new TextView(this);
-        statusText.setText("Connected! Waiting for Screen Data...");
+        statusText.setText("Connecting WebRTC...\nPlease wait.");
         statusText.setTextColor(Color.CYAN);
         statusText.setTextSize(18);
         statusText.setPadding(30, 30, 30, 30);
 
-        layout.addView(imageView);
+        layout.addView(surfaceViewRenderer);
         layout.addView(statusText);
         setContentView(layout);
 
-        try {
-            mSocket = IO.socket(MainActivity.SERVER_URL);
-            
-            mSocket.on(Socket.EVENT_CONNECT, args -> {
-                mSocket.emit("request-connect", roomId);
-            });
+        initWebRTC();
+        initSocket();
 
-            mSocket.on("receive-screen", args -> {
-                try {
-                    JSONObject data = (JSONObject) args[0];
-                    String base64 = data.getString("image");
-                    hostWidth = (float) data.getDouble("width");
-                    hostHeight = (float) data.getDouble("height");
-                    
-                    byte[] decodedString = Base64.decode(base64, Base64.DEFAULT);
-                    Bitmap decodedByte = BitmapFactory.decodeByteArray(decodedString, 0, decodedString.length);
-                    
-                    frameCount++;
-                    runOnUiThread(() -> {
-                        imageView.setImageBitmap(decodedByte);
-                        if(frameCount == 1) {
-                            statusText.setVisibility(TextView.GONE);
-                        }
-                    });
-                } catch (Exception e) { e.printStackTrace(); }
-            });
-
-            mSocket.connect();
-        } catch (URISyntaxException e) { e.printStackTrace(); }
-
-        imageView.setOnTouchListener((v, event) -> {
+        surfaceViewRenderer.setOnTouchListener((v, event) -> {
             if (event.getAction() == MotionEvent.ACTION_DOWN) {
-                float viewWidth = imageView.getWidth();
-                float viewHeight = imageView.getHeight();
+                float viewWidth = surfaceViewRenderer.getWidth();
+                float viewHeight = surfaceViewRenderer.getHeight();
                 if(viewWidth == 0 || viewHeight == 0) return true;
 
-                float xRatio = hostWidth / viewWidth;
-                float yRatio = hostHeight / viewHeight;
-                
-                float finalX = event.getX() * xRatio;
-                float finalY = event.getY() * yRatio;
+                // Normalize coordinates (0.0 to 1.0) as suggested in PDF
+                float normalizedX = event.getX() / viewWidth;
+                float normalizedY = event.getY() / viewHeight;
 
                 JSONObject data = new JSONObject();
                 try {
                     data.put("roomId", roomId);
-                    data.put("x", finalX);
-                    data.put("y", finalY);
+                    data.put("xRatio", normalizedX);
+                    data.put("yRatio", normalizedY);
                     mSocket.emit("touch-event", data);
                 } catch (JSONException e) { e.printStackTrace(); }
             }
             return true;
         });
+    }
+
+    private void initWebRTC() {
+        PeerConnectionFactory.InitializationOptions initOptions = PeerConnectionFactory.InitializationOptions.builder(this).createInitializationOptions();
+        PeerConnectionFactory.initialize(initOptions);
+
+        eglBase = EglBase.create();
+        peerConnectionFactory = PeerConnectionFactory.builder().createPeerConnectionFactory();
+        
+        surfaceViewRenderer.init(eglBase.getEglBaseContext(), null);
+
+        List<PeerConnection.IceServer> iceServers = new ArrayList<>();
+        iceServers.add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer());
+
+        PeerConnection.RTCConfiguration rtcConfig = new PeerConnection.RTCConfiguration(iceServers);
+        peerConnection = peerConnectionFactory.createPeerConnection(rtcConfig, new PeerConnection.Observer() {
+            @Override public void onSignalingChange(PeerConnection.SignalingState signalingState) {}
+            @Override public void onIceConnectionChange(PeerConnection.IceConnectionState iceConnectionState) {
+                runOnUiThread(() -> {
+                    if(iceConnectionState == PeerConnection.IceConnectionState.CONNECTED) {
+                        statusText.setVisibility(TextView.GONE);
+                    }
+                });
+            }
+            @Override public void onIceConnectionReceivingChange(boolean b) {}
+            @Override public void onIceGatheringChange(PeerConnection.IceGatheringState iceGatheringState) {}
+            @Override public void onIceCandidate(IceCandidate iceCandidate) {
+                JSONObject obj = new JSONObject();
+                try {
+                    obj.put("roomId", roomId);
+                    obj.put("candidate", iceCandidate.sdp);
+                    mSocket.emit("ice-candidate", obj);
+                } catch (JSONException e) { e.printStackTrace(); }
+            }
+            @Override public void onIceCandidatesRemoved(IceCandidate[] iceCandidates) {}
+            @Override public void onAddStream(MediaStream mediaStream) {}
+            @Override public void onRemoveStream(MediaStream mediaStream) {}
+            @Override public void onDataChannel(DataChannel dataChannel) {}
+            @Override public void onRenegotiationNeeded() {}
+            @Override public void onAddTrack(RtpReceiver rtpReceiver, MediaStream[] mediaStreams) {
+                if (mediaStreams.length > 0 && mediaStreams[0].videoTracks.size() > 0) {
+                    VideoTrack track = mediaStreams[0].videoTracks.get(0);
+                    runOnUiThread(() -> track.addSink(surfaceViewRenderer));
+                }
+            }
+        });
+    }
+
+    private void initSocket() {
+        try {
+            mSocket = IO.socket(MainActivity.SERVER_URL);
+            mSocket.on(Socket.EVENT_CONNECT, args -> mSocket.emit("join", roomId));
+
+            mSocket.on("offer", args -> {
+                String sdp = (String) args[0];
+                SessionDescription offer = new SessionDescription(SessionDescription.Type.OFFER, sdp);
+                peerConnection.setRemoteDescription(new SdpObserver() {}, offer);
+                
+                for (IceCandidate candidate : iceCandidates) {
+                    peerConnection.addIceCandidate(candidate);
+                }
+                iceCandidates.clear();
+
+                peerConnection.createAnswer(new SdpObserver() {
+                    @Override public void onCreateSuccess(SessionDescription sessionDescription) {
+                        peerConnection.setLocalDescription(new SdpObserver() {}, sessionDescription);
+                        JSONObject obj = new JSONObject();
+                        try {
+                            obj.put("roomId", roomId);
+                            obj.put("sdp", sessionDescription.description);
+                            mSocket.emit("answer", obj);
+                        } catch (JSONException e) { e.printStackTrace(); }
+                    }
+                    @Override public void onSetSuccess() {}
+                    @Override public void onCreateFailure(String s) {}
+                    @Override public void onSetFailure(String s) {}
+                }, new MediaConstraints());
+            });
+
+            mSocket.on("ice-candidate", args -> {
+                String sdp = (String) args[0];
+                IceCandidate candidate = new IceCandidate("0", 0, sdp);
+                if (peerConnection.getRemoteDescription() != null) {
+                    peerConnection.addIceCandidate(candidate);
+                } else {
+                    iceCandidates.add(candidate);
+                }
+            });
+
+            mSocket.connect();
+        } catch (URISyntaxException e) { e.printStackTrace(); }
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (peerConnection != null) peerConnection.close();
+        if (mSocket != null) mSocket.disconnect();
+        if (eglBase != null) eglBase.release();
+        super.onDestroy();
     }
 }

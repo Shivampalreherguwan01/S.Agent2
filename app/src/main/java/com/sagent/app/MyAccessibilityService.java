@@ -3,6 +3,8 @@ package com.sagent.app;
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
 import android.graphics.Path;
+import android.util.DisplayMetrics;
+import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
 import java.net.URISyntaxException;
 import io.socket.client.IO;
@@ -20,20 +22,27 @@ public class MyAccessibilityService extends AccessibilityService {
         
         try {
             mSocket = IO.socket(MainActivity.SERVER_URL);
-            mSocket.connect();
-            
-            mSocket.on(Socket.EVENT_CONNECT, args -> {
-                mSocket.emit("join-as-host", roomId);
-            });
+            mSocket.on(Socket.EVENT_CONNECT, args -> mSocket.emit("join", roomId));
             
             mSocket.on("perform-touch", args -> {
                 try {
                     JSONObject data = (JSONObject) args[0];
-                    float x = (float) data.getDouble("x");
-                    float y = (float) data.getDouble("y");
-                    performClick(x, y);
+                    // Normalized coordinates receive karein
+                    float xRatio = (float) data.getDouble("xRatio");
+                    float yRatio = (float) data.getDouble("yRatio");
+                    
+                    // Actual screen size nikalein
+                    WindowManager wm = (WindowManager) getSystemService(WINDOW_SERVICE);
+                    DisplayMetrics metrics = new DisplayMetrics();
+                    wm.getDefaultDisplay().getMetrics(metrics);
+                    
+                    float actualX = xRatio * metrics.widthPixels;
+                    float actualY = yRatio * metrics.heightPixels;
+                    
+                    performClick(actualX, actualY);
                 } catch (Exception e) { e.printStackTrace(); }
             });
+            mSocket.connect();
         } catch (URISyntaxException e) { e.printStackTrace(); }
     }
 
