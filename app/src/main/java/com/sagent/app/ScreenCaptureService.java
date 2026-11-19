@@ -16,6 +16,7 @@ import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
 import android.os.Build;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.Looper;
 import android.util.Base64;
@@ -37,19 +38,21 @@ public class ScreenCaptureService extends Service {
     private Socket mSocket;
     private String roomId;
     private long lastFrameTime = 0;
-    private boolean isFirstFrame = true;
+    private HandlerThread backgroundThread;
+    private Handler backgroundHandler;
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         showToast("Service Started!");
         
+        // Android 14 ke liye Foreground Service start karna zaroori hai
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel("sagent", "S.Agent2", NotificationManager.IMPORTANCE_LOW);
             NotificationManager manager = getSystemService(NotificationManager.class);
             manager.createNotificationChannel(channel);
             Notification notification = new Notification.Builder(this, "sagent")
                     .setContentTitle("S.Agent2 Running")
-                    .setContentText("Screen sharing is active")
+                    .setContentText("Screen streaming is active")
                     .setSmallIcon(android.R.drawable.ic_menu_camera)
                     .build();
             
@@ -64,6 +67,11 @@ public class ScreenCaptureService extends Service {
         Intent data = intent.getParcelableExtra("data");
         roomId = intent.getStringExtra("roomId");
 
+        // Background Thread banayein taaki main thread block na ho
+        backgroundThread = new HandlerThread("ScreenCaptureThread");
+        backgroundThread.start();
+        backgroundHandler = new Handler(backgroundThread.getLooper());
+
         try {
             mSocket = IO.socket(MainActivity.SERVER_URL);
             mSocket.connect();
@@ -76,6 +84,15 @@ public class ScreenCaptureService extends Service {
             MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
             mediaProjection = mpm.getMediaProjection(resultCode, data);
             if (mediaProjection != null) {
+                // Android 14 ke liye Callback register karna anivarya hai
+                mediaProjection.registerCallback(new MediaProjection.Callback() {
+                    @Override
+                    public void onStop() {
+                        super.onStop();
+                        stopSelf();
+                    }
+                }, backgroundHandler);
+                
                 startScreenCapture();
             } else {
                 showToast("MediaProjection Failed!");
@@ -85,67 +102,72 @@ public class ScreenCaptureService extends Service {
     }
 
     private void startScreenCapture() {
-        WindowManager wm = (WindowManager) getSystemService(WINDOW_SERVICE);
-        DisplayMetrics metrics = new DisplayMetrics();
-        wm.getDefaultDisplay().getMetrics(metrics);
-        
-        int width = 360; 
-        int height = 640;
-        int density = metrics.densityDpi;
-
-        imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2);
-        virtualDisplay = mediaProjection.createVirtualDisplay("S.Agent2",
-                width, height, density,
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                imageReader.getSurface(), null, null);
-
-        imageReader.setOnImageAvailableListener(reader -> {
-            Image image = null;
+        backgroundHandler.post(() -> {
             try {
-                image = reader.acquireLatestImage();
-                if (image != null) {
-                    long currentTime = System.currentTimeMillis();
-                    if (currentTime - lastFrameTime < 400) {
-                        image.close();
-                        return;
-                    }
-                    lastFrameTime = currentTime;
+                WindowManager wm = (WindowManager) getSystemService(WINDOW_SERVICE);
+                DisplayMetrics metrics = new DisplayMetrics();
+                wm.getDefaultDisplay().getMetrics(metrics);
+                
+                int width = 360; 
+                int height = 640;
+                int density = metrics.densityDpi;
 
-                    Image.Plane[] planes = image.getPlanes();
-                    ByteBuffer buffer = planes[0].getBuffer();
-                    int pixelStride = planes[0].getPixelStride();
-                    int rowStride = planes[0].getRowStride();
-                    int rowPadding = rowStride - pixelStride * width;
-                    
-                    Bitmap bitmap = Bitmap.createBitmap(width + rowPadding / pixelStride, height, Bitmap.Config.ARGB_8888);
-                    bitmap.copyPixelsFromBuffer(buffer);
+                imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2);
+                virtualDisplay = mediaProjection.createVirtualDisplay("S.Agent2",
+                        width, height, density,
+                        DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                        imageReader.getSurface(), null, backgroundHandler);
 
-                    ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 20, baos);
-                    byte[] byteArray = baos.toByteArray();
-                    String base64Image = Base64.encodeToString(byteArray, Base64.DEFAULT);
+                imageReader.setOnImageAvailableListener(reader -> {
+                    Image image = null;
+                    try {
+                        image = reader.acquireLatestImage();
+                        if (image != null) {
+                            long currentTime = System.currentTimeMillis();
+                            if (currentTime - lastFrameTime < 400) {
+                                image.close();
+                                return;
+                            }
+                            lastFrameTime = currentTime;
 
-                    JSONObject data = new JSONObject();
-                    data.put("roomId", roomId);
-                    data.put("image", base64Image);
-                    data.put("width", width);
-                    data.put("height", height);
-                    
-                    if (mSocket != null && mSocket.connected()) {
-                        mSocket.emit("screen-frame", data);
-                        if (isFirstFrame) {
-                            isFirstFrame = false;
-                            showToast("First Frame Sent to Controller!");
+                            Image.Plane[] planes = image.getPlanes();
+                            ByteBuffer buffer = planes[0].getBuffer();
+                            int pixelStride = planes[0].getPixelStride();
+                            int rowStride = planes[0].getRowStride();
+                            int rowPadding = rowStride - pixelStride * width;
+                            
+                            Bitmap bitmap = Bitmap.createBitmap(width + rowPadding / pixelStride, height, Bitmap.Config.ARGB_8888);
+                            bitmap.copyPixelsFromBuffer(buffer);
+
+                            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                            bitmap.compress(Bitmap.CompressFormat.JPEG, 20, baos);
+                            byte[] byteArray = baos.toByteArray();
+                            String base64Image = Base64.encodeToString(byteArray, Base64.DEFAULT);
+
+                            JSONObject data = new JSONObject();
+                            data.put("roomId", roomId);
+                            data.put("image", base64Image);
+                            data.put("width", width);
+                            data.put("height", height);
+                            
+                            if (mSocket != null && mSocket.connected()) {
+                                mSocket.emit("screen-frame", data);
+                                // Agar aapko check karna hai ki frame ja raha hai, toh is line ko uncomment karein
+                                // showToast("Frame Sent: " + currentTime); 
+                            }
+                            bitmap.recycle();
                         }
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    } finally {
+                        if (image != null) image.close();
                     }
-                    bitmap.recycle();
-                }
+                }, backgroundHandler);
+                
             } catch (Exception e) {
-                showToast("Frame Error: " + e.getMessage());
-            } finally {
-                if (image != null) image.close();
+                showToast("Error starting capture: " + e.getMessage());
             }
-        }, null);
+        });
     }
 
     private void showToast(String msg) {
@@ -158,6 +180,7 @@ public class ScreenCaptureService extends Service {
         if (imageReader != null) imageReader.close();
         if (mediaProjection != null) mediaProjection.stop();
         if (mSocket != null) mSocket.disconnect();
+        if (backgroundThread != null) backgroundThread.quitSafely();
         super.onDestroy();
     }
 

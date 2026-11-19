@@ -50,17 +50,6 @@ public class LiveControlActivity extends AppCompatActivity {
             
             mSocket.on(Socket.EVENT_CONNECT, args -> {
                 mSocket.emit("request-connect", roomId);
-                runOnUiThread(() -> {
-                    statusText.setText("✅ Server Connected!\nRequesting Host...");
-                    statusText.setTextColor(Color.GREEN);
-                });
-            });
-
-            mSocket.on("connection-accepted", args -> {
-                runOnUiThread(() -> {
-                    statusText.setText("⏳ Host Accepted! Waiting for Data...");
-                    statusText.setTextColor(Color.CYAN);
-                });
             });
 
             mSocket.on("receive-screen", args -> {
@@ -76,8 +65,7 @@ public class LiveControlActivity extends AppCompatActivity {
                     frameCount++;
                     runOnUiThread(() -> {
                         imageView.setImageBitmap(decodedByte);
-                        // Agar frame aa gaya toh text hide kar do
-                        if(frameCount > 1) {
+                        if(frameCount == 1) {
                             statusText.setVisibility(TextView.GONE);
                         }
                     });
