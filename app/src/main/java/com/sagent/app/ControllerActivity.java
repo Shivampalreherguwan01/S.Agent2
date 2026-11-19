@@ -1,84 +1,133 @@
 package com.sagent.app;
 
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
-import android.util.Base64;
-import android.view.MotionEvent;
-import android.widget.ImageView;
+import android.text.InputType;
+import android.view.Gravity;
+import android.view.View;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
-import java.net.URISyntaxException;
-import io.socket.client.IO;
-import io.socket.client.Socket;
-import org.json.JSONException;
-import org.json.JSONObject;
 
 public class ControllerActivity extends AppCompatActivity {
-    private Socket mSocket;
-    private String roomId;
-    private ImageView imageView;
-    private float hostWidth = 540f, hostHeight = 960f; // Default
+    private LinearLayout deviceList;
+    private SharedPreferences prefs;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        roomId = getIntent().getStringExtra("roomId");
+        prefs = getSharedPreferences("SAgentPrefs", Context.MODE_PRIVATE);
 
-        imageView = new ImageView(this);
-        imageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        setContentView(imageView);
+        LinearLayout mainLayout = new LinearLayout(this);
+        mainLayout.setOrientation(LinearLayout.VERTICAL);
+        mainLayout.setBackgroundColor(Color.parseColor("#121212"));
+        mainLayout.setPadding(40, 40, 40, 40);
 
-        try {
-            mSocket = IO.socket(MainActivity.SERVER_URL);
-            mSocket.connect();
-            
-            // Auto Reconnect Room Join
-            mSocket.on(Socket.EVENT_CONNECT, args -> {
-                mSocket.emit("join-as-controller", roomId);
-                runOnUiThread(() -> Toast.makeText(this, "Connected to Server!", Toast.LENGTH_SHORT).show());
-            });
+        TextView title = new TextView(this);
+        title.setText("My Devices");
+        title.setTextColor(Color.WHITE);
+        title.setTextSize(28);
+        title.setPadding(0, 0, 0, 30);
 
-            // Receive Live Screen
-            mSocket.on("receive-screen", args -> {
-                try {
-                    JSONObject data = (JSONObject) args[0];
-                    String base64 = data.getString("image");
-                    hostWidth = (float) data.getDouble("width");
-                    hostHeight = (float) data.getDouble("height");
-                    
-                    byte[] decodedString = Base64.decode(base64, Base64.DEFAULT);
-                    Bitmap decodedByte = BitmapFactory.decodeByteArray(decodedString, 0, decodedString.length);
-                    
-                    runOnUiThread(() -> imageView.setImageBitmap(decodedByte));
-                } catch (Exception e) { e.printStackTrace(); }
-            });
+        deviceList = new LinearLayout(this);
+        deviceList.setOrientation(LinearLayout.VERTICAL);
 
-        } catch (URISyntaxException e) { e.printStackTrace(); }
+        Button btnAdd = new Button(this);
+        btnAdd.setText("+ Add Device (Enter Code)");
+        btnAdd.setBackgroundColor(Color.parseColor("#6200EE"));
+        btnAdd.setTextColor(Color.WHITE);
+        btnAdd.setOnClickListener(v -> showAddDeviceDialog());
 
-        // Touch Handling
-        imageView.setOnTouchListener((v, event) -> {
-            if (event.getAction() == MotionEvent.ACTION_DOWN) {
-                // Calculate Actual Touch Coordinates based on ImageView Size
-                float viewWidth = imageView.getWidth();
-                float viewHeight = imageView.getHeight();
-                
-                float xRatio = hostWidth / viewWidth;
-                float yRatio = hostHeight / viewHeight;
-                
-                float finalX = event.getX() * xRatio;
-                float finalY = event.getY() * yRatio;
+        mainLayout.addView(title);
+        mainLayout.addView(deviceList);
+        mainLayout.addView(btnAdd);
+        setContentView(mainLayout);
 
-                JSONObject data = new JSONObject();
-                try {
-                    data.put("roomId", roomId);
-                    data.put("x", finalX);
-                    data.put("y", finalY);
-                    mSocket.emit("touch-event", data);
-                } catch (JSONException e) { e.printStackTrace(); }
+        loadSavedDevices();
+    }
+
+    private void showAddDeviceDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle("Enter Pairing Code");
+
+        final EditText input = new EditText(this);
+        input.setInputType(InputType.TYPE_CLASS_TEXT);
+        input.setHint("e.g. SA-123456");
+        builder.setView(input);
+
+        builder.setPositiveButton("Connect", (dialog, which) -> {
+            String code = input.getText().toString().trim();
+            if (!code.isEmpty()) {
+                saveDevice(code);
+                Intent intent = new Intent(this, LiveControlActivity.class);
+                intent.putExtra("roomId", code);
+                startActivity(intent);
             }
-            return true;
         });
+        builder.setNegativeButton("Cancel", (dialog, which) -> dialog.cancel());
+        builder.show();
+    }
+
+    private void saveDevice(String code) {
+        String saved = prefs.getString("savedDevices", "");
+        if (!saved.contains(code)) {
+            saved = saved.isEmpty() ? code : saved + "," + code;
+            prefs.edit().putString("savedDevices", saved).apply();
+            loadSavedDevices();
+        }
+    }
+
+    private void loadSavedDevices() {
+        deviceList.removeAllViews();
+        String saved = prefs.getString("savedDevices", "");
+        if (saved.isEmpty()) {
+            TextView empty = new TextView(this);
+            empty.setText("No devices added yet.");
+            empty.setTextColor(Color.GRAY);
+            deviceList.addView(empty);
+            return;
+        }
+
+        String[] devices = saved.split(",");
+        for (String code : devices) {
+            // Device Card UI
+            LinearLayout card = new LinearLayout(this);
+            card.setOrientation(LinearLayout.HORIZONTAL);
+            card.setBackgroundColor(Color.parseColor("#1E1E1E"));
+            card.setPadding(30, 30, 30, 30);
+            card.setGravity(Gravity.CENTER_VERTICAL);
+            
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            params.setMargins(0, 0, 0, 20);
+            card.setLayoutParams(params);
+
+            TextView tvName = new TextView(this);
+            tvName.setText("Device: " + code);
+            tvName.setTextColor(Color.WHITE);
+            tvName.setTextSize(18);
+            tvName.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+            Button btnControl = new Button(this);
+            btnControl.setText("Control");
+            btnControl.setOnClickListener(v -> {
+                Intent intent = new Intent(this, LiveControlActivity.class);
+                intent.putExtra("roomId", code);
+                startActivity(intent);
+            });
+
+            card.addView(tvName);
+            card.addView(btnControl);
+            deviceList.addView(card);
+        }
     }
 }

@@ -9,7 +9,7 @@
         android:allowBackup="true"
         android:label="S.Agent2"
         android:usesCleartextTraffic="true" 
-        android:theme="@style/Theme.AppCompat.Light">
+        android:theme="@style/Theme.AppCompat.DayNight.NoActionBar">
         
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
@@ -18,7 +18,9 @@
             </intent-filter>
         </activity>
         
+        <activity android:name=".HostActivity" android:exported="false" />
         <activity android:name=".ControllerActivity" android:exported="false" />
+        <activity android:name=".LiveControlActivity" android:exported="false" />
 
         <service
             android:name=".ScreenCaptureService"

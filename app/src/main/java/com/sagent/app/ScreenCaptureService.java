@@ -24,7 +24,6 @@ import java.net.URISyntaxException;
 import java.nio.ByteBuffer;
 import io.socket.client.IO;
 import io.socket.client.Socket;
-import org.json.JSONException;
 import org.json.JSONObject;
 
 public class ScreenCaptureService extends Service {
@@ -83,7 +82,6 @@ public class ScreenCaptureService extends Service {
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                 imageReader.getSurface(), null, null);
 
-        // Yahan humne sirf 2 arguments rakhe hain (Handler null kar diya)
         imageReader.setOnImageAvailableListener(reader -> {
             Image image = null;
             try {
@@ -119,7 +117,7 @@ public class ScreenCaptureService extends Service {
             } finally {
                 if (image != null) image.close();
             }
-        }, null); // <--- Yahan pehle null, null tha, ab sirf null hai
+        }, null);
     }
 
     @Override
