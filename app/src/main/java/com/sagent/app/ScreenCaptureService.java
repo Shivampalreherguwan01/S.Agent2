@@ -5,6 +5,7 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Intent;
+import android.content.pm.ServiceInfo;
 import android.graphics.Bitmap;
 import android.graphics.PixelFormat;
 import android.hardware.display.DisplayManager;
@@ -14,10 +15,13 @@ import android.media.ImageReader;
 import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.util.Base64;
 import android.util.DisplayMetrics;
 import android.view.WindowManager;
+import android.widget.Toast;
 import androidx.annotation.Nullable;
 import java.io.ByteArrayOutputStream;
 import java.net.URISyntaxException;
@@ -32,10 +36,13 @@ public class ScreenCaptureService extends Service {
     private ImageReader imageReader;
     private Socket mSocket;
     private String roomId;
-    private long lastFrameTime = 0; // FPS control ke liye
+    private long lastFrameTime = 0;
+    private boolean isFirstFrame = true;
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        showToast("Service Started!");
+        
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel("sagent", "S.Agent2", NotificationManager.IMPORTANCE_LOW);
             NotificationManager manager = getSystemService(NotificationManager.class);
@@ -45,7 +52,12 @@ public class ScreenCaptureService extends Service {
                     .setContentText("Screen sharing is active")
                     .setSmallIcon(android.R.drawable.ic_menu_camera)
                     .build();
-            startForeground(1, notification);
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
+            } else {
+                startForeground(1, notification);
+            }
         }
 
         int resultCode = intent.getIntExtra("resultCode", -1);
@@ -63,7 +75,11 @@ public class ScreenCaptureService extends Service {
         if (resultCode != -1 && data != null) {
             MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
             mediaProjection = mpm.getMediaProjection(resultCode, data);
-            startScreenCapture();
+            if (mediaProjection != null) {
+                startScreenCapture();
+            } else {
+                showToast("MediaProjection Failed!");
+            }
         }
         return START_STICKY;
     }
@@ -73,7 +89,6 @@ public class ScreenCaptureService extends Service {
         DisplayMetrics metrics = new DisplayMetrics();
         wm.getDefaultDisplay().getMetrics(metrics);
         
-        // Resolution aur Quality kam kar di taaki Render server crash na ho
         int width = 360; 
         int height = 640;
         int density = metrics.densityDpi;
@@ -90,7 +105,6 @@ public class ScreenCaptureService extends Service {
                 image = reader.acquireLatestImage();
                 if (image != null) {
                     long currentTime = System.currentTimeMillis();
-                    // FPS LIMIT: Har 400ms (approx 2.5 FPS) mein hi frame bhejenge
                     if (currentTime - lastFrameTime < 400) {
                         image.close();
                         return;
@@ -107,7 +121,7 @@ public class ScreenCaptureService extends Service {
                     bitmap.copyPixelsFromBuffer(buffer);
 
                     ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 20, baos); // Quality 20%
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 20, baos);
                     byte[] byteArray = baos.toByteArray();
                     String base64Image = Base64.encodeToString(byteArray, Base64.DEFAULT);
 
@@ -119,15 +133,23 @@ public class ScreenCaptureService extends Service {
                     
                     if (mSocket != null && mSocket.connected()) {
                         mSocket.emit("screen-frame", data);
+                        if (isFirstFrame) {
+                            isFirstFrame = false;
+                            showToast("First Frame Sent to Controller!");
+                        }
                     }
                     bitmap.recycle();
                 }
             } catch (Exception e) {
-                e.printStackTrace();
+                showToast("Frame Error: " + e.getMessage());
             } finally {
                 if (image != null) image.close();
             }
         }, null);
+    }
+
+    private void showToast(String msg) {
+        new Handler(Looper.getMainLooper()).post(() -> Toast.makeText(getApplicationContext(), msg, Toast.LENGTH_SHORT).show());
     }
 
     @Override

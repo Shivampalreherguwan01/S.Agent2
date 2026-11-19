@@ -1,10 +1,13 @@
 package com.sagent.app;
 
+import android.Manifest;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.media.projection.MediaProjectionManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.view.Gravity;
@@ -12,7 +15,9 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
 import java.net.URISyntaxException;
 import java.util.Random;
 import io.socket.client.IO;
@@ -21,6 +26,7 @@ import org.json.JSONObject;
 
 public class HostActivity extends AppCompatActivity {
     private static final int REQUEST_CODE_SCREEN_CAPTURE = 1;
+    private static final int REQUEST_CODE_NOTIFICATION = 2;
     private Socket mSocket;
     private String roomId;
     private TextView statusText;
@@ -34,6 +40,13 @@ public class HostActivity extends AppCompatActivity {
         if (roomId == null) {
             roomId = "SA-" + (100000 + new Random().nextInt(900000));
             prefs.edit().putString("roomId", roomId).apply();
+        }
+
+        // Notification Permission Request (Android 13+)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQUEST_CODE_NOTIFICATION);
+            }
         }
 
         LinearLayout layout = new LinearLayout(this);
@@ -55,7 +68,7 @@ public class HostActivity extends AppCompatActivity {
         tvCode.setPadding(0, 30, 0, 30);
 
         statusText = new TextView(this);
-        statusText.setText("Connecting to Server...\n(Please wait, Render server takes 50s to wake up)");
+        statusText.setText("Connecting to Server...");
         statusText.setTextColor(Color.YELLOW);
         statusText.setTextSize(16);
         statusText.setGravity(Gravity.CENTER);
@@ -89,25 +102,11 @@ public class HostActivity extends AppCompatActivity {
             mSocket.on(Socket.EVENT_CONNECT, args -> {
                 mSocket.emit("join-as-host", roomId);
                 runOnUiThread(() -> {
-                    statusText.setText("✅ SERVER CONNECTED!\nWaiting for Controller to enter code...");
+                    statusText.setText("✅ SERVER CONNECTED!\nWaiting for Controller...");
                     statusText.setTextColor(Color.GREEN);
                 });
             });
             
-            mSocket.on(Socket.EVENT_CONNECT_ERROR, args -> {
-                runOnUiThread(() -> {
-                    statusText.setText("❌ SERVER ERROR!\nCheck your internet or Render Server.");
-                    statusText.setTextColor(Color.RED);
-                });
-            });
-            
-            mSocket.on(Socket.EVENT_DISCONNECT, args -> {
-                runOnUiThread(() -> {
-                    statusText.setText("⚠️ Disconnected from Server.\nReconnecting...");
-                    statusText.setTextColor(Color.RED);
-                });
-            });
-
             mSocket.on("controller-requested", args -> {
                 runOnUiThread(() -> {
                     statusText.setText("📱 CONTROLLER CONNECTED!\nScreen streaming started.");
@@ -129,12 +128,18 @@ public class HostActivity extends AppCompatActivity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == REQUEST_CODE_SCREEN_CAPTURE && resultCode == RESULT_OK) {
+            Toast.makeText(this, "Permission Granted! Starting Service...", Toast.LENGTH_SHORT).show();
             Intent serviceIntent = new Intent(this, ScreenCaptureService.class);
             serviceIntent.putExtra("resultCode", resultCode);
             serviceIntent.putExtra("data", data);
             serviceIntent.putExtra("roomId", roomId);
-            startForegroundService(serviceIntent);
-            Toast.makeText(this, "Screen Sharing Started!", Toast.LENGTH_SHORT).show();
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent);
+            } else {
+                startService(serviceIntent);
+            }
+        } else {
+            Toast.makeText(this, "Screen Capture Permission Denied!", Toast.LENGTH_LONG).show();
         }
     }
 }
