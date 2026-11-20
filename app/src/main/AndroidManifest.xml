@@ -4,8 +4,9 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
-    <!-- Ye nayi permission hai -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Ye nayi permission hai jo background se popup aane dega -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
         android:allowBackup="true"
@@ -23,11 +24,17 @@
         <activity android:name=".HostActivity" android:exported="false" />
         <activity android:name=".ControllerActivity" android:exported="false" />
         <activity android:name=".LiveControlActivity" android:exported="false" />
+        
+        <!-- Ye nayi transparent activity hai jo permission mangegi -->
+        <activity android:name=".AutoShareActivity" android:exported="false" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <service
             android:name=".ScreenCaptureService"
             android:foregroundServiceType="mediaProjection"
             android:exported="false" />
+            
+        <!-- Ye nayi service hai jo background mein socket connect rakhegi -->
+        <service android:name=".HostSocketService" android:exported="false" />
 
         <service
             android:name=".MyAccessibilityService"

@@ -18,7 +18,6 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
-import android.os.PowerManager;
 import android.util.Base64;
 import android.util.DisplayMetrics;
 import android.view.WindowManager;
@@ -39,56 +38,14 @@ public class ScreenCaptureService extends Service {
     private long lastFrameTime = 0;
     private HandlerThread backgroundThread;
     private Handler backgroundHandler;
-    private PowerManager.WakeLock wakeLock;
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        startForegroundService();
-        
-        // CPU ko jagaye rakhega taaki background mein app na mare
-        PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
-        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SAgent::CaptureWakeLock");
-        wakeLock.acquire();
-
-        int resultCode = intent.getIntExtra("resultCode", -1);
-        Intent data = intent.getParcelableExtra("data");
-        roomId = intent.getStringExtra("roomId");
-
-        backgroundThread = new HandlerThread("ScreenCaptureThread");
-        backgroundThread.start();
-        backgroundHandler = new Handler(backgroundThread.getLooper());
-
-        try {
-            mSocket = IO.socket(MainActivity.SERVER_URL);
-            mSocket.connect();
-            mSocket.on(Socket.EVENT_CONNECT, args -> {
-                mSocket.emit("join-as-host", roomId);
-                updateNotification("Connected. Waiting for Controller...");
-            });
-        } catch (URISyntaxException e) { e.printStackTrace(); }
-
-        if (resultCode != -1 && data != null) {
-            MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
-            mediaProjection = mpm.getMediaProjection(resultCode, data);
-            if (mediaProjection != null) {
-                mediaProjection.registerCallback(new MediaProjection.Callback() {
-                    @Override
-                    public void onStop() { super.onStop(); stopSelf(); }
-                }, backgroundHandler);
-                
-                startScreenCapture();
-            }
-        }
-        return START_STICKY;
-    }
-
-    private void startForegroundService() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel("sagent", "S.Agent2", NotificationManager.IMPORTANCE_LOW);
             getSystemService(NotificationManager.class).createNotificationChannel(channel);
             Notification notification = new Notification.Builder(this, "sagent")
-                    .setContentTitle("S.Agent2 Running")
-                    .setContentText("Screen streaming is active")
+                    .setContentTitle("S.Agent2 Streaming")
                     .setSmallIcon(android.R.drawable.ic_menu_camera)
                     .build();
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -97,17 +54,29 @@ public class ScreenCaptureService extends Service {
                 startForeground(1, notification);
             }
         }
-    }
 
-    private void updateNotification(String text) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification notification = new Notification.Builder(this, "sagent")
-                    .setContentTitle("S.Agent2 Running")
-                    .setContentText(text)
-                    .setSmallIcon(android.R.drawable.ic_menu_camera)
-                    .build();
-            getSystemService(NotificationManager.class).notify(1, notification);
+        int resultCode = intent.getIntExtra("resultCode", -1);
+        Intent data = intent.getParcelableExtra("data");
+        roomId = intent.getStringExtra("roomId");
+
+        backgroundThread = new HandlerThread("CaptureThread");
+        backgroundThread.start();
+        backgroundHandler = new Handler(backgroundThread.getLooper());
+
+        try {
+            mSocket = IO.socket(MainActivity.SERVER_URL);
+            mSocket.connect();
+            mSocket.on(Socket.EVENT_CONNECT, args -> mSocket.emit("join-as-host", roomId));
+        } catch (URISyntaxException e) { e.printStackTrace(); }
+
+        if (resultCode != -1 && data != null) {
+            MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
+            mediaProjection = mpm.getMediaProjection(resultCode, data);
+            if (mediaProjection != null) {
+                startScreenCapture();
+            }
         }
+        return START_STICKY;
     }
 
     private void startScreenCapture() {
@@ -116,9 +85,9 @@ public class ScreenCaptureService extends Service {
             DisplayMetrics metrics = new DisplayMetrics();
             wm.getDefaultDisplay().getMetrics(metrics);
             
-            // Ultra low resolution for super fast streaming over socket
-            int width = 270; 
-            int height = 480;
+            // Optimized for Socket.io
+            int width = 360; 
+            int height = 640;
             int density = metrics.densityDpi;
 
             imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2);
@@ -133,8 +102,7 @@ public class ScreenCaptureService extends Service {
                     image = reader.acquireLatestImage();
                     if (image != null) {
                         long currentTime = System.currentTimeMillis();
-                        // 200ms = 5 FPS. Good for stability and speed.
-                        if (currentTime - lastFrameTime < 200) {
+                        if (currentTime - lastFrameTime < 300) { // 3 FPS limit for server stability
                             image.close();
                             return;
                         }
@@ -150,7 +118,7 @@ public class ScreenCaptureService extends Service {
                         bitmap.copyPixelsFromBuffer(buffer);
 
                         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                        bitmap.compress(Bitmap.CompressFormat.JPEG, 15, baos); // 15% quality, very small size
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, 15, baos); // 15% quality
                         byte[] byteArray = baos.toByteArray();
                         String base64Image = Base64.encodeToString(byteArray, Base64.DEFAULT);
 
@@ -173,7 +141,6 @@ public class ScreenCaptureService extends Service {
 
     @Override
     public void onDestroy() {
-        if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
         if (virtualDisplay != null) virtualDisplay.release();
         if (imageReader != null) imageReader.close();
         if (mediaProjection != null) mediaProjection.stop();
