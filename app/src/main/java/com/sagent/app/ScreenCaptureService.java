@@ -22,19 +22,19 @@ import android.util.Base64;
 import android.util.DisplayMetrics;
 import android.view.WindowManager;
 import androidx.annotation.Nullable;
+import com.google.firebase.database.DatabaseReference;
+import com.google.firebase.database.FirebaseDatabase;
 import java.io.ByteArrayOutputStream;
-import java.net.URISyntaxException;
 import java.nio.ByteBuffer;
-import io.socket.client.IO;
-import io.socket.client.Socket;
-import org.json.JSONObject;
+import java.util.HashMap;
+import java.util.Map;
 
 public class ScreenCaptureService extends Service {
     private MediaProjection mediaProjection;
     private VirtualDisplay virtualDisplay;
     private ImageReader imageReader;
-    private Socket mSocket;
     private String roomId;
+    private DatabaseReference screenRef;
     private long lastFrameTime = 0;
     private HandlerThread backgroundThread;
     private Handler backgroundHandler;
@@ -59,15 +59,11 @@ public class ScreenCaptureService extends Service {
         Intent data = intent.getParcelableExtra("data");
         roomId = intent.getStringExtra("roomId");
 
+        screenRef = FirebaseDatabase.getInstance(MainActivity.DB_URL).getReference("rooms").child(roomId).child("screen");
+
         backgroundThread = new HandlerThread("CaptureThread");
         backgroundThread.start();
         backgroundHandler = new Handler(backgroundThread.getLooper());
-
-        try {
-            mSocket = IO.socket(MainActivity.SERVER_URL);
-            mSocket.connect();
-            mSocket.on(Socket.EVENT_CONNECT, args -> mSocket.emit("join-as-host", roomId));
-        } catch (URISyntaxException e) { e.printStackTrace(); }
 
         if (resultCode != -1 && data != null) {
             MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
@@ -85,7 +81,6 @@ public class ScreenCaptureService extends Service {
             DisplayMetrics metrics = new DisplayMetrics();
             wm.getDefaultDisplay().getMetrics(metrics);
             
-            // Optimized for Socket.io
             int width = 360; 
             int height = 640;
             int density = metrics.densityDpi;
@@ -102,7 +97,8 @@ public class ScreenCaptureService extends Service {
                     image = reader.acquireLatestImage();
                     if (image != null) {
                         long currentTime = System.currentTimeMillis();
-                        if (currentTime - lastFrameTime < 300) { // 3 FPS limit for server stability
+                        // 250ms = 4 FPS (Smooth enough for control, light on Firebase)
+                        if (currentTime - lastFrameTime < 250) {
                             image.close();
                             return;
                         }
@@ -122,15 +118,14 @@ public class ScreenCaptureService extends Service {
                         byte[] byteArray = baos.toByteArray();
                         String base64Image = Base64.encodeToString(byteArray, Base64.DEFAULT);
 
-                        JSONObject data = new JSONObject();
-                        data.put("roomId", roomId);
-                        data.put("image", base64Image);
-                        data.put("width", width);
-                        data.put("height", height);
+                        Map<String, Object> frameData = new HashMap<>();
+                        frameData.put("image", base64Image);
+                        frameData.put("width", width);
+                        frameData.put("height", height);
                         
-                        if (mSocket != null && mSocket.connected()) {
-                            mSocket.emit("screen-frame", data);
-                        }
+                        // Firebase par push karo
+                        screenRef.setValue(frameData);
+                        
                         bitmap.recycle();
                     }
                 } catch (Exception e) { e.printStackTrace(); } 
@@ -144,7 +139,6 @@ public class ScreenCaptureService extends Service {
         if (virtualDisplay != null) virtualDisplay.release();
         if (imageReader != null) imageReader.close();
         if (mediaProjection != null) mediaProjection.stop();
-        if (mSocket != null) mSocket.disconnect();
         if (backgroundThread != null) backgroundThread.quitSafely();
         super.onDestroy();
     }
