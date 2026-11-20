@@ -2,6 +2,8 @@ package com.sagent.app;
 
 import android.graphics.Color;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 import android.view.MotionEvent;
 import android.widget.FrameLayout;
@@ -26,6 +28,8 @@ public class LiveControlActivity extends AppCompatActivity {
     private PeerConnection peerConnection;
     private EglBase eglBase;
     private final List<IceCandidate> iceCandidates = new ArrayList<>();
+    private Handler retryHandler = new Handler(Looper.getMainLooper());
+    private Runnable retryRunnable;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -37,7 +41,7 @@ public class LiveControlActivity extends AppCompatActivity {
 
         surfaceViewRenderer = new SurfaceViewRenderer(this);
         statusText = new TextView(this);
-        statusText.setText("Requesting Host to connect...\nPlease wait.");
+        statusText.setText("Request Sent. Waiting for Host...");
         statusText.setTextColor(Color.CYAN);
         statusText.setTextSize(18);
         statusText.setPadding(30, 30, 30, 30);
@@ -81,12 +85,7 @@ public class LiveControlActivity extends AppCompatActivity {
 
         List<PeerConnection.IceServer> iceServers = new ArrayList<>();
         iceServers.add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer());
-        iceServers.add(PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer());
-        
-        // TURN Servers
         iceServers.add(PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80")
-                .setUsername("openrelayproject").setPassword("openrelayproject").createIceServer());
-        iceServers.add(PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443")
                 .setUsername("openrelayproject").setPassword("openrelayproject").createIceServer());
 
         PeerConnection.RTCConfiguration rtcConfig = new PeerConnection.RTCConfiguration(iceServers);
@@ -99,8 +98,11 @@ public class LiveControlActivity extends AppCompatActivity {
                 runOnUiThread(() -> {
                     if(iceConnectionState == PeerConnection.IceConnectionState.CONNECTED) {
                         statusText.setVisibility(TextView.GONE);
+                        // Stop retrying once connected
+                        if(retryHandler != null && retryRunnable != null) retryHandler.removeCallbacks(retryRunnable);
                     } else if (iceConnectionState == PeerConnection.IceConnectionState.FAILED) {
-                        statusText.setText("Connection Failed. Host might be offline or network issue.");
+                        statusText.setVisibility(TextView.VISIBLE);
+                        statusText.setText("Connection Failed. Retrying...");
                     }
                 });
             }
@@ -134,11 +136,22 @@ public class LiveControlActivity extends AppCompatActivity {
             
             mSocket.on(Socket.EVENT_CONNECT, args -> {
                 mSocket.emit("join", roomId);
-                mSocket.emit("request-connect", roomId);
-                runOnUiThread(() -> statusText.setText("Request Sent. Waiting for Host..."));
+                
+                // Retry logic: Request connection every 5 seconds
+                retryRunnable = new Runnable() {
+                    @Override
+                    public void run() {
+                        mSocket.emit("request-connect", roomId);
+                        retryHandler.postDelayed(this, 5000);
+                    }
+                };
+                retryHandler.post(retryRunnable);
             });
 
             mSocket.on("offer", args -> {
+                // Once offer received, stop retrying
+                if(retryHandler != null && retryRunnable != null) retryHandler.removeCallbacks(retryRunnable);
+
                 String sdp = (String) args[0];
                 SessionDescription offer = new SessionDescription(SessionDescription.Type.OFFER, sdp);
                 
@@ -168,7 +181,6 @@ public class LiveControlActivity extends AppCompatActivity {
                             obj.put("roomId", roomId);
                             obj.put("sdp", sessionDescription.description);
                             mSocket.emit("answer", obj);
-                            Log.d(TAG, "Answer Emitted!");
                         } catch (JSONException e) { e.printStackTrace(); }
                     }
                     @Override public void onSetSuccess() {}
@@ -193,6 +205,7 @@ public class LiveControlActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        if(retryHandler != null && retryRunnable != null) retryHandler.removeCallbacks(retryRunnable);
         if (peerConnection != null) peerConnection.close();
         if (mSocket != null) mSocket.disconnect();
         if (eglBase != null) eglBase.release();

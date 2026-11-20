@@ -34,24 +34,13 @@ public class ScreenCaptureService extends Service {
     private EglBase eglBase;
     private final List<IceCandidate> iceCandidates = new ArrayList<>();
     private boolean isPeerConnectionCreated = false;
+    private NotificationManager notificationManager;
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationChannel channel = new NotificationChannel("sagent", "S.Agent2", NotificationManager.IMPORTANCE_LOW);
-            NotificationManager manager = getSystemService(NotificationManager.class);
-            manager.createNotificationChannel(channel);
-            Notification notification = new Notification.Builder(this, "sagent")
-                    .setContentTitle("S.Agent2 Running")
-                    .setContentText("Waiting for controller to connect...")
-                    .setSmallIcon(android.R.drawable.ic_menu_camera)
-                    .build();
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
-            } else {
-                startForeground(1, notification);
-            }
-        }
+        notificationManager = getSystemService(NotificationManager.class);
+        createNotificationChannel();
+        updateNotification("Connecting to Server...");
 
         int resultCode = intent.getIntExtra("resultCode", -1);
         Intent data = intent.getParcelableExtra("data");
@@ -76,6 +65,38 @@ public class ScreenCaptureService extends Service {
         return START_STICKY;
     }
 
+    private void createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel channel = new NotificationChannel("sagent", "S.Agent2", NotificationManager.IMPORTANCE_LOW);
+            notificationManager.createNotificationChannel(channel);
+        }
+    }
+
+    private void updateNotification(String text) {
+        Notification.Builder builder;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            builder = new Notification.Builder(this, "sagent");
+        } else {
+            builder = new Notification.Builder(this);
+        }
+        
+        Notification notification = builder
+                .setContentTitle("S.Agent2 Host Mode")
+                .setContentText(text)
+                .setSmallIcon(android.R.drawable.ic_menu_camera)
+                .build();
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
+        } else {
+            startForeground(1, notification);
+        }
+        
+        if (notificationManager != null) {
+            notificationManager.notify(1, notification);
+        }
+    }
+
     private void initWebRTCBase(Intent data) {
         PeerConnectionFactory.InitializationOptions initOptions = PeerConnectionFactory.InitializationOptions.builder(this).createInitializationOptions();
         PeerConnectionFactory.initialize(initOptions);
@@ -97,16 +118,8 @@ public class ScreenCaptureService extends Service {
         if (isPeerConnectionCreated) return;
 
         List<PeerConnection.IceServer> iceServers = new ArrayList<>();
-        // STUN Servers
         iceServers.add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer());
-        iceServers.add(PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer());
-        
-        // TURN Server (Free OpenRelay - Zaroori hai CGNAT/4G ke liye)
         iceServers.add(PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80")
-                .setUsername("openrelayproject").setPassword("openrelayproject").createIceServer());
-        iceServers.add(PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443")
-                .setUsername("openrelayproject").setPassword("openrelayproject").createIceServer());
-        iceServers.add(PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443?transport=tcp")
                 .setUsername("openrelayproject").setPassword("openrelayproject").createIceServer());
 
         PeerConnection.RTCConfiguration rtcConfig = new PeerConnection.RTCConfiguration(iceServers);
@@ -114,13 +127,9 @@ public class ScreenCaptureService extends Service {
 
         peerConnection = peerConnectionFactory.createPeerConnection(rtcConfig, new PeerConnection.Observer() {
             @Override public void onSignalingChange(PeerConnection.SignalingState signalingState) {}
-            @Override public void onIceConnectionChange(PeerConnection.IceConnectionState state) {
-                Log.d(TAG, "ICE State: " + state);
-            }
+            @Override public void onIceConnectionChange(PeerConnection.IceConnectionState state) {}
             @Override public void onIceConnectionReceivingChange(boolean b) {}
-            @Override public void onIceGatheringChange(PeerConnection.IceGatheringState state) {
-                 Log.d(TAG, "ICE Gathering: " + state);
-            }
+            @Override public void onIceGatheringChange(PeerConnection.IceGatheringState state) {}
             @Override public void onIceCandidate(IceCandidate iceCandidate) {
                 JSONObject obj = new JSONObject();
                 try {
@@ -157,7 +166,7 @@ public class ScreenCaptureService extends Service {
                     obj.put("roomId", roomId);
                     obj.put("sdp", sessionDescription.description);
                     mSocket.emit("offer", obj);
-                    Log.d(TAG, "Offer Emitted!");
+                    updateNotification("Streaming Started!");
                 } catch (JSONException e) { e.printStackTrace(); }
             }
             @Override public void onSetSuccess() {}
@@ -169,10 +178,18 @@ public class ScreenCaptureService extends Service {
     private void initSocket() {
         try {
             mSocket = IO.socket(MainActivity.SERVER_URL);
-            mSocket.on(Socket.EVENT_CONNECT, args -> mSocket.emit("join", roomId));
+            
+            mSocket.on(Socket.EVENT_CONNECT, args -> {
+                mSocket.emit("join", roomId);
+                updateNotification("Server Connected. Waiting for Controller...");
+            });
+
+            mSocket.on(Socket.EVENT_CONNECT_ERROR, args -> {
+                updateNotification("Server Connection Error! Check Internet.");
+            });
             
             mSocket.on("controller-joined", args -> {
-                Log.d(TAG, "Controller Joined, Creating Offer...");
+                updateNotification("Controller Found! Connecting...");
                 createPeerConnectionAndOffer();
             });
             
