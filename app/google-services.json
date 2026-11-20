@@ -1,21 +1,22 @@
 {
   "project_info": {
-    "project_number": "197720415548",
-    "project_id": "shivam-store-8d1aa",
-    "storage_bucket": "shivam-store-8d1aa.firebasestorage.app"
+    "project_number": "261265490373",
+    "firebase_url": "https://fir-agent2-56832-default-rtdb.firebaseio.com",
+    "project_id": "fir-agent2-56832",
+    "storage_bucket": "fir-agent2-56832.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:197720415548:android:b7587ce017e2a642c29239",
+        "mobilesdk_app_id": "1:261265490373:android:899b2dd7c9d8f83b480bac",
         "android_client_info": {
-          "package_name": "com.shivam.store"
+          "package_name": "com.sagent.app"
         }
       },
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyBRZ3E62y2pJt_oObAri1SYQUSJwK-OKJs"
+          "current_key": "AIzaSyAwUYoAAGjyeoNBT3fe97KeT1J_KU1Jtos"
         }
       ],
       "services": {
