@@ -1,33 +1,29 @@
 package com.sagent.app;
 
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.util.Log;
+import android.util.Base64;
 import android.view.MotionEvent;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.TextView;
 import androidx.appcompat.app.AppCompatActivity;
-import org.json.JSONException;
-import org.json.JSONObject;
-import org.webrtc.*;
 import java.net.URISyntaxException;
-import java.util.ArrayList;
-import java.util.List;
 import io.socket.client.IO;
 import io.socket.client.Socket;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 public class LiveControlActivity extends AppCompatActivity {
-    private static final String TAG = "ControllerActivity";
     private Socket mSocket;
     private String roomId;
+    private ImageView imageView;
     private TextView statusText;
-    private SurfaceViewRenderer surfaceViewRenderer;
-    private PeerConnectionFactory peerConnectionFactory;
-    private PeerConnection peerConnection;
-    private EglBase eglBase;
-    private final List<IceCandidate> iceCandidates = new ArrayList<>();
+    private float hostWidth = 270f, hostHeight = 480f;
     private Handler retryHandler = new Handler(Looper.getMainLooper());
     private Runnable retryRunnable;
 
@@ -39,34 +35,79 @@ public class LiveControlActivity extends AppCompatActivity {
         FrameLayout layout = new FrameLayout(this);
         layout.setBackgroundColor(Color.BLACK);
 
-        surfaceViewRenderer = new SurfaceViewRenderer(this);
+        imageView = new ImageView(this);
+        imageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        
         statusText = new TextView(this);
-        statusText.setText("Request Sent. Waiting for Host...");
+        statusText.setText("Connecting...\nPlease wait for host.");
         statusText.setTextColor(Color.CYAN);
-        statusText.setTextSize(18);
+        statusText.setTextSize(20);
         statusText.setPadding(30, 30, 30, 30);
 
-        layout.addView(surfaceViewRenderer);
+        layout.addView(imageView);
         layout.addView(statusText);
         setContentView(layout);
 
-        initWebRTC();
-        initSocket();
+        try {
+            mSocket = IO.socket(MainActivity.SERVER_URL);
+            
+            mSocket.on(Socket.EVENT_CONNECT, args -> {
+                mSocket.emit("join-as-controller", roomId);
+                
+                // Retry logic: Har 2 second mein host ko request bhejega
+                retryRunnable = new Runnable() {
+                    @Override
+                    public void run() {
+                        if (statusText.getVisibility() == TextView.VISIBLE) {
+                            mSocket.emit("request-connect", roomId);
+                            retryHandler.postDelayed(this, 2000);
+                        }
+                    }
+                };
+                retryHandler.post(retryRunnable);
+            });
 
-        surfaceViewRenderer.setOnTouchListener((v, event) -> {
+            mSocket.on("receive-screen", args -> {
+                try {
+                    JSONObject data = (JSONObject) args[0];
+                    String base64 = data.getString("image");
+                    hostWidth = (float) data.getDouble("width");
+                    hostHeight = (float) data.getDouble("height");
+                    
+                    byte[] decodedString = Base64.decode(base64, Base64.DEFAULT);
+                    Bitmap decodedByte = BitmapFactory.decodeByteArray(decodedString, 0, decodedString.length);
+                    
+                    runOnUiThread(() -> {
+                        imageView.setImageBitmap(decodedByte);
+                        if(statusText.getVisibility() == TextView.VISIBLE) {
+                            statusText.setVisibility(TextView.GONE);
+                            // Stop retrying once connected
+                            if(retryHandler != null && retryRunnable != null) retryHandler.removeCallbacks(retryRunnable);
+                        }
+                    });
+                } catch (Exception e) { e.printStackTrace(); }
+            });
+
+            mSocket.connect();
+        } catch (URISyntaxException e) { e.printStackTrace(); }
+
+        imageView.setOnTouchListener((v, event) -> {
             if (event.getAction() == MotionEvent.ACTION_DOWN) {
-                float viewWidth = surfaceViewRenderer.getWidth();
-                float viewHeight = surfaceViewRenderer.getHeight();
+                float viewWidth = imageView.getWidth();
+                float viewHeight = imageView.getHeight();
                 if(viewWidth == 0 || viewHeight == 0) return true;
 
-                float normalizedX = event.getX() / viewWidth;
-                float normalizedY = event.getY() / viewHeight;
+                float xRatio = hostWidth / viewWidth;
+                float yRatio = hostHeight / viewHeight;
+                
+                float finalX = event.getX() * xRatio;
+                float finalY = event.getY() * yRatio;
 
                 JSONObject data = new JSONObject();
                 try {
                     data.put("roomId", roomId);
-                    data.put("xRatio", normalizedX);
-                    data.put("yRatio", normalizedY);
+                    data.put("x", finalX);
+                    data.put("y", finalY);
                     if(mSocket != null) mSocket.emit("touch-event", data);
                 } catch (JSONException e) { e.printStackTrace(); }
             }
@@ -74,141 +115,10 @@ public class LiveControlActivity extends AppCompatActivity {
         });
     }
 
-    private void initWebRTC() {
-        PeerConnectionFactory.InitializationOptions initOptions = PeerConnectionFactory.InitializationOptions.builder(this).createInitializationOptions();
-        PeerConnectionFactory.initialize(initOptions);
-
-        eglBase = EglBase.create();
-        peerConnectionFactory = PeerConnectionFactory.builder().createPeerConnectionFactory();
-        
-        surfaceViewRenderer.init(eglBase.getEglBaseContext(), null);
-
-        List<PeerConnection.IceServer> iceServers = new ArrayList<>();
-        iceServers.add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer());
-        iceServers.add(PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80")
-                .setUsername("openrelayproject").setPassword("openrelayproject").createIceServer());
-
-        PeerConnection.RTCConfiguration rtcConfig = new PeerConnection.RTCConfiguration(iceServers);
-        rtcConfig.sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN;
-
-        peerConnection = peerConnectionFactory.createPeerConnection(rtcConfig, new PeerConnection.Observer() {
-            @Override public void onSignalingChange(PeerConnection.SignalingState signalingState) {}
-            @Override public void onIceConnectionChange(PeerConnection.IceConnectionState iceConnectionState) {
-                Log.d(TAG, "ICE State: " + iceConnectionState);
-                runOnUiThread(() -> {
-                    if(iceConnectionState == PeerConnection.IceConnectionState.CONNECTED) {
-                        statusText.setVisibility(TextView.GONE);
-                        // Stop retrying once connected
-                        if(retryHandler != null && retryRunnable != null) retryHandler.removeCallbacks(retryRunnable);
-                    } else if (iceConnectionState == PeerConnection.IceConnectionState.FAILED) {
-                        statusText.setVisibility(TextView.VISIBLE);
-                        statusText.setText("Connection Failed. Retrying...");
-                    }
-                });
-            }
-            @Override public void onIceConnectionReceivingChange(boolean b) {}
-            @Override public void onIceGatheringChange(PeerConnection.IceGatheringState iceGatheringState) {}
-            @Override public void onIceCandidate(IceCandidate iceCandidate) {
-                JSONObject obj = new JSONObject();
-                try {
-                    obj.put("roomId", roomId);
-                    obj.put("candidate", iceCandidate.sdp);
-                    if(mSocket != null) mSocket.emit("ice-candidate", obj);
-                } catch (JSONException e) { e.printStackTrace(); }
-            }
-            @Override public void onIceCandidatesRemoved(IceCandidate[] iceCandidates) {}
-            @Override public void onAddStream(MediaStream mediaStream) {}
-            @Override public void onRemoveStream(MediaStream mediaStream) {}
-            @Override public void onDataChannel(DataChannel dataChannel) {}
-            @Override public void onRenegotiationNeeded() {}
-            @Override public void onAddTrack(RtpReceiver rtpReceiver, MediaStream[] mediaStreams) {
-                if (mediaStreams.length > 0 && mediaStreams[0].videoTracks.size() > 0) {
-                    VideoTrack track = mediaStreams[0].videoTracks.get(0);
-                    runOnUiThread(() -> track.addSink(surfaceViewRenderer));
-                }
-            }
-        });
-    }
-
-    private void initSocket() {
-        try {
-            mSocket = IO.socket(MainActivity.SERVER_URL);
-            
-            mSocket.on(Socket.EVENT_CONNECT, args -> {
-                mSocket.emit("join", roomId);
-                
-                // Retry logic: Request connection every 5 seconds
-                retryRunnable = new Runnable() {
-                    @Override
-                    public void run() {
-                        mSocket.emit("request-connect", roomId);
-                        retryHandler.postDelayed(this, 5000);
-                    }
-                };
-                retryHandler.post(retryRunnable);
-            });
-
-            mSocket.on("offer", args -> {
-                // Once offer received, stop retrying
-                if(retryHandler != null && retryRunnable != null) retryHandler.removeCallbacks(retryRunnable);
-
-                String sdp = (String) args[0];
-                SessionDescription offer = new SessionDescription(SessionDescription.Type.OFFER, sdp);
-                
-                peerConnection.setRemoteDescription(new SdpObserver() {
-                    @Override public void onCreateSuccess(SessionDescription sessionDescription) {}
-                    @Override public void onSetSuccess() {}
-                    @Override public void onCreateFailure(String s) {}
-                    @Override public void onSetFailure(String s) { Log.e(TAG, "SetRemoteDesc Fail: " + s); }
-                }, offer);
-                
-                for (IceCandidate candidate : iceCandidates) {
-                    peerConnection.addIceCandidate(candidate);
-                }
-                iceCandidates.clear();
-
-                peerConnection.createAnswer(new SdpObserver() {
-                    @Override public void onCreateSuccess(SessionDescription sessionDescription) {
-                        peerConnection.setLocalDescription(new SdpObserver() {
-                            @Override public void onCreateSuccess(SessionDescription sessionDescription) {}
-                            @Override public void onSetSuccess() {}
-                            @Override public void onCreateFailure(String s) {}
-                            @Override public void onSetFailure(String s) { Log.e(TAG, "SetLocalDesc Fail: " + s); }
-                        }, sessionDescription);
-                        
-                        JSONObject obj = new JSONObject();
-                        try {
-                            obj.put("roomId", roomId);
-                            obj.put("sdp", sessionDescription.description);
-                            mSocket.emit("answer", obj);
-                        } catch (JSONException e) { e.printStackTrace(); }
-                    }
-                    @Override public void onSetSuccess() {}
-                    @Override public void onCreateFailure(String s) { Log.e(TAG, "CreateAnswer Fail: " + s); }
-                    @Override public void onSetFailure(String s) {}
-                }, new MediaConstraints());
-            });
-
-            mSocket.on("ice-candidate", args -> {
-                String sdp = (String) args[0];
-                IceCandidate candidate = new IceCandidate("0", 0, sdp);
-                if (peerConnection != null && peerConnection.getRemoteDescription() != null) {
-                    peerConnection.addIceCandidate(candidate);
-                } else {
-                    iceCandidates.add(candidate);
-                }
-            });
-
-            mSocket.connect();
-        } catch (URISyntaxException e) { e.printStackTrace(); }
-    }
-
     @Override
     protected void onDestroy() {
         if(retryHandler != null && retryRunnable != null) retryHandler.removeCallbacks(retryRunnable);
-        if (peerConnection != null) peerConnection.close();
         if (mSocket != null) mSocket.disconnect();
-        if (eglBase != null) eglBase.release();
         super.onDestroy();
     }
 }

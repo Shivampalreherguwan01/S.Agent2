@@ -6,231 +6,179 @@ import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.graphics.Bitmap;
+import android.graphics.PixelFormat;
+import android.hardware.display.DisplayManager;
+import android.hardware.display.VirtualDisplay;
+import android.media.Image;
+import android.media.ImageReader;
 import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
 import android.os.Build;
+import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.IBinder;
-import android.util.Log;
+import android.os.PowerManager;
+import android.util.Base64;
+import android.util.DisplayMetrics;
+import android.view.WindowManager;
 import androidx.annotation.Nullable;
-import org.json.JSONException;
-import org.json.JSONObject;
-import org.webrtc.*;
+import java.io.ByteArrayOutputStream;
 import java.net.URISyntaxException;
-import java.util.ArrayList;
-import java.util.List;
+import java.nio.ByteBuffer;
 import io.socket.client.IO;
 import io.socket.client.Socket;
+import org.json.JSONObject;
 
 public class ScreenCaptureService extends Service {
-    private static final String TAG = "HostService";
+    private MediaProjection mediaProjection;
+    private VirtualDisplay virtualDisplay;
+    private ImageReader imageReader;
     private Socket mSocket;
     private String roomId;
-    private MediaProjection mediaProjection;
-    private PeerConnectionFactory peerConnectionFactory;
-    private PeerConnection peerConnection;
-    private VideoCapturer videoCapturer;
-    private VideoTrack localVideoTrack;
-    private SurfaceTextureHelper surfaceTextureHelper;
-    private EglBase eglBase;
-    private final List<IceCandidate> iceCandidates = new ArrayList<>();
-    private boolean isPeerConnectionCreated = false;
-    private NotificationManager notificationManager;
+    private long lastFrameTime = 0;
+    private HandlerThread backgroundThread;
+    private Handler backgroundHandler;
+    private PowerManager.WakeLock wakeLock;
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        notificationManager = getSystemService(NotificationManager.class);
-        createNotificationChannel();
-        updateNotification("Connecting to Server...");
+        startForegroundService();
+        
+        // CPU ko jagaye rakhega taaki background mein app na mare
+        PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
+        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SAgent::CaptureWakeLock");
+        wakeLock.acquire();
 
         int resultCode = intent.getIntExtra("resultCode", -1);
         Intent data = intent.getParcelableExtra("data");
         roomId = intent.getStringExtra("roomId");
 
-        MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
-        mediaProjection = mpm.getMediaProjection(resultCode, data);
-        
-        if (mediaProjection != null) {
-            mediaProjection.registerCallback(new MediaProjection.Callback() {
-                @Override
-                public void onStop() {
-                    super.onStop();
-                    stopSelf();
-                }
-            }, null);
-        }
+        backgroundThread = new HandlerThread("ScreenCaptureThread");
+        backgroundThread.start();
+        backgroundHandler = new Handler(backgroundThread.getLooper());
 
-        initWebRTCBase(data);
-        initSocket();
-        
+        try {
+            mSocket = IO.socket(MainActivity.SERVER_URL);
+            mSocket.connect();
+            mSocket.on(Socket.EVENT_CONNECT, args -> {
+                mSocket.emit("join-as-host", roomId);
+                updateNotification("Connected. Waiting for Controller...");
+            });
+        } catch (URISyntaxException e) { e.printStackTrace(); }
+
+        if (resultCode != -1 && data != null) {
+            MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
+            mediaProjection = mpm.getMediaProjection(resultCode, data);
+            if (mediaProjection != null) {
+                mediaProjection.registerCallback(new MediaProjection.Callback() {
+                    @Override
+                    public void onStop() { super.onStop(); stopSelf(); }
+                }, backgroundHandler);
+                
+                startScreenCapture();
+            }
+        }
         return START_STICKY;
     }
 
-    private void createNotificationChannel() {
+    private void startForegroundService() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel("sagent", "S.Agent2", NotificationManager.IMPORTANCE_LOW);
-            notificationManager.createNotificationChannel(channel);
+            getSystemService(NotificationManager.class).createNotificationChannel(channel);
+            Notification notification = new Notification.Builder(this, "sagent")
+                    .setContentTitle("S.Agent2 Running")
+                    .setContentText("Screen streaming is active")
+                    .setSmallIcon(android.R.drawable.ic_menu_camera)
+                    .build();
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
+            } else {
+                startForeground(1, notification);
+            }
         }
     }
 
     private void updateNotification(String text) {
-        Notification.Builder builder;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            builder = new Notification.Builder(this, "sagent");
-        } else {
-            builder = new Notification.Builder(this);
-        }
-        
-        Notification notification = builder
-                .setContentTitle("S.Agent2 Host Mode")
-                .setContentText(text)
-                .setSmallIcon(android.R.drawable.ic_menu_camera)
-                .build();
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
-        } else {
-            startForeground(1, notification);
-        }
-        
-        if (notificationManager != null) {
-            notificationManager.notify(1, notification);
+            Notification notification = new Notification.Builder(this, "sagent")
+                    .setContentTitle("S.Agent2 Running")
+                    .setContentText(text)
+                    .setSmallIcon(android.R.drawable.ic_menu_camera)
+                    .build();
+            getSystemService(NotificationManager.class).notify(1, notification);
         }
     }
 
-    private void initWebRTCBase(Intent data) {
-        PeerConnectionFactory.InitializationOptions initOptions = PeerConnectionFactory.InitializationOptions.builder(this).createInitializationOptions();
-        PeerConnectionFactory.initialize(initOptions);
+    private void startScreenCapture() {
+        backgroundHandler.post(() -> {
+            WindowManager wm = (WindowManager) getSystemService(WINDOW_SERVICE);
+            DisplayMetrics metrics = new DisplayMetrics();
+            wm.getDefaultDisplay().getMetrics(metrics);
+            
+            // Ultra low resolution for super fast streaming over socket
+            int width = 270; 
+            int height = 480;
+            int density = metrics.densityDpi;
 
-        eglBase = EglBase.create();
-        peerConnectionFactory = PeerConnectionFactory.builder().createPeerConnectionFactory();
+            imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2);
+            virtualDisplay = mediaProjection.createVirtualDisplay("S.Agent2",
+                    width, height, density,
+                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                    imageReader.getSurface(), null, backgroundHandler);
 
-        surfaceTextureHelper = SurfaceTextureHelper.create("CaptureThread", eglBase.getEglBaseContext());
-        videoCapturer = new ScreenCapturerAndroid(data, new MediaProjection.Callback() {});
-        
-        VideoSource videoSource = peerConnectionFactory.createVideoSource(false);
-        videoCapturer.initialize(surfaceTextureHelper, getApplicationContext(), videoSource.getCapturerObserver());
-        videoCapturer.startCapture(540, 960, 30);
-
-        localVideoTrack = peerConnectionFactory.createVideoTrack("VIDEO_TRACK", videoSource);
-    }
-
-    private void createPeerConnectionAndOffer() {
-        if (isPeerConnectionCreated) return;
-
-        List<PeerConnection.IceServer> iceServers = new ArrayList<>();
-        iceServers.add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer());
-        iceServers.add(PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80")
-                .setUsername("openrelayproject").setPassword("openrelayproject").createIceServer());
-
-        PeerConnection.RTCConfiguration rtcConfig = new PeerConnection.RTCConfiguration(iceServers);
-        rtcConfig.sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN;
-
-        peerConnection = peerConnectionFactory.createPeerConnection(rtcConfig, new PeerConnection.Observer() {
-            @Override public void onSignalingChange(PeerConnection.SignalingState signalingState) {}
-            @Override public void onIceConnectionChange(PeerConnection.IceConnectionState state) {}
-            @Override public void onIceConnectionReceivingChange(boolean b) {}
-            @Override public void onIceGatheringChange(PeerConnection.IceGatheringState state) {}
-            @Override public void onIceCandidate(IceCandidate iceCandidate) {
-                JSONObject obj = new JSONObject();
+            imageReader.setOnImageAvailableListener(reader -> {
+                Image image = null;
                 try {
-                    obj.put("roomId", roomId);
-                    obj.put("candidate", iceCandidate.sdp);
-                    if(mSocket != null) mSocket.emit("ice-candidate", obj);
-                } catch (JSONException e) { e.printStackTrace(); }
-            }
-            @Override public void onIceCandidatesRemoved(IceCandidate[] iceCandidates) {}
-            @Override public void onAddStream(MediaStream mediaStream) {}
-            @Override public void onRemoveStream(MediaStream mediaStream) {}
-            @Override public void onDataChannel(DataChannel dataChannel) {}
-            @Override public void onRenegotiationNeeded() {}
-            @Override public void onAddTrack(RtpReceiver rtpReceiver, MediaStream[] mediaStreams) {}
+                    image = reader.acquireLatestImage();
+                    if (image != null) {
+                        long currentTime = System.currentTimeMillis();
+                        // 200ms = 5 FPS. Good for stability and speed.
+                        if (currentTime - lastFrameTime < 200) {
+                            image.close();
+                            return;
+                        }
+                        lastFrameTime = currentTime;
+
+                        Image.Plane[] planes = image.getPlanes();
+                        ByteBuffer buffer = planes[0].getBuffer();
+                        int pixelStride = planes[0].getPixelStride();
+                        int rowStride = planes[0].getRowStride();
+                        int rowPadding = rowStride - pixelStride * width;
+                        
+                        Bitmap bitmap = Bitmap.createBitmap(width + rowPadding / pixelStride, height, Bitmap.Config.ARGB_8888);
+                        bitmap.copyPixelsFromBuffer(buffer);
+
+                        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, 15, baos); // 15% quality, very small size
+                        byte[] byteArray = baos.toByteArray();
+                        String base64Image = Base64.encodeToString(byteArray, Base64.DEFAULT);
+
+                        JSONObject data = new JSONObject();
+                        data.put("roomId", roomId);
+                        data.put("image", base64Image);
+                        data.put("width", width);
+                        data.put("height", height);
+                        
+                        if (mSocket != null && mSocket.connected()) {
+                            mSocket.emit("screen-frame", data);
+                        }
+                        bitmap.recycle();
+                    }
+                } catch (Exception e) { e.printStackTrace(); } 
+                finally { if (image != null) image.close(); }
+            }, backgroundHandler);
         });
-
-        peerConnection.addTrack(localVideoTrack);
-        isPeerConnectionCreated = true;
-        createOffer();
-    }
-
-    private void createOffer() {
-        peerConnection.createOffer(new SdpObserver() {
-            @Override public void onCreateSuccess(SessionDescription sessionDescription) {
-                peerConnection.setLocalDescription(new SdpObserver() {
-                    @Override public void onCreateSuccess(SessionDescription sessionDescription) {}
-                    @Override public void onSetSuccess() {}
-                    @Override public void onCreateFailure(String s) {}
-                    @Override public void onSetFailure(String s) { Log.e(TAG, "SetLocalDesc Fail: " + s); } 
-                }, sessionDescription);
-                
-                JSONObject obj = new JSONObject();
-                try {
-                    obj.put("roomId", roomId);
-                    obj.put("sdp", sessionDescription.description);
-                    mSocket.emit("offer", obj);
-                    updateNotification("Streaming Started!");
-                } catch (JSONException e) { e.printStackTrace(); }
-            }
-            @Override public void onSetSuccess() {}
-            @Override public void onCreateFailure(String s) { Log.e(TAG, "CreateOffer Fail: " + s); }
-            @Override public void onSetFailure(String s) {}
-        }, new MediaConstraints());
-    }
-
-    private void initSocket() {
-        try {
-            mSocket = IO.socket(MainActivity.SERVER_URL);
-            
-            mSocket.on(Socket.EVENT_CONNECT, args -> {
-                mSocket.emit("join", roomId);
-                updateNotification("Server Connected. Waiting for Controller...");
-            });
-
-            mSocket.on(Socket.EVENT_CONNECT_ERROR, args -> {
-                updateNotification("Server Connection Error! Check Internet.");
-            });
-            
-            mSocket.on("controller-joined", args -> {
-                updateNotification("Controller Found! Connecting...");
-                createPeerConnectionAndOffer();
-            });
-            
-            mSocket.on("answer", args -> {
-                String sdp = (String) args[0];
-                SessionDescription answer = new SessionDescription(SessionDescription.Type.ANSWER, sdp);
-                peerConnection.setRemoteDescription(new SdpObserver() {
-                    @Override public void onCreateSuccess(SessionDescription sessionDescription) {}
-                    @Override public void onSetSuccess() {}
-                    @Override public void onCreateFailure(String s) {}
-                    @Override public void onSetFailure(String s) { Log.e(TAG, "SetRemoteDesc Fail: " + s); }
-                }, answer);
-                
-                for (IceCandidate candidate : iceCandidates) {
-                    peerConnection.addIceCandidate(candidate);
-                }
-                iceCandidates.clear();
-            });
-
-            mSocket.on("ice-candidate", args -> {
-                String sdp = (String) args[0];
-                IceCandidate candidate = new IceCandidate("0", 0, sdp);
-                if (peerConnection != null && peerConnection.getRemoteDescription() != null) {
-                    peerConnection.addIceCandidate(candidate);
-                } else {
-                    iceCandidates.add(candidate);
-                }
-            });
-
-            mSocket.connect();
-        } catch (URISyntaxException e) { e.printStackTrace(); }
     }
 
     @Override
     public void onDestroy() {
-        try {
-            if (videoCapturer != null) videoCapturer.stopCapture();
-            if (peerConnection != null) peerConnection.close();
-            if (mSocket != null) mSocket.disconnect();
-            if (eglBase != null) eglBase.release();
-        } catch (Exception e) { e.printStackTrace(); }
+        if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+        if (virtualDisplay != null) virtualDisplay.release();
+        if (imageReader != null) imageReader.close();
+        if (mediaProjection != null) mediaProjection.stop();
+        if (mSocket != null) mSocket.disconnect();
+        if (backgroundThread != null) backgroundThread.quitSafely();
         super.onDestroy();
     }
 

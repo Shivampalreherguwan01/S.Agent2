@@ -80,7 +80,7 @@ public class HostActivity extends AppCompatActivity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == REQUEST_CODE_SCREEN_CAPTURE && resultCode == RESULT_OK) {
-            Toast.makeText(this, "Screen Sharing Started! You can minimize the app.", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Screen Sharing Started! Minimize the app.", Toast.LENGTH_LONG).show();
             Intent serviceIntent = new Intent(this, ScreenCaptureService.class);
             serviceIntent.putExtra("resultCode", resultCode);
             serviceIntent.putExtra("data", data);
@@ -90,7 +90,6 @@ public class HostActivity extends AppCompatActivity {
             } else {
                 startService(serviceIntent);
             }
-            // Activity ko band kar do taaki user home screen par ja sake
             finishAffinity(); 
         }
     }
