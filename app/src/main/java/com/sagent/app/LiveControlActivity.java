@@ -24,7 +24,7 @@ public class LiveControlActivity extends AppCompatActivity {
     private ImageView imageView;
     private TextView statusText;
     private DatabaseReference screenRef, touchRef, requestRef;
-    private float hostWidth = 360f, hostHeight = 640f;
+    private float hostWidth = 270f, hostHeight = 480f;
     private boolean isFirstFrame = true;
 
     @Override
@@ -34,12 +34,11 @@ public class LiveControlActivity extends AppCompatActivity {
 
         FrameLayout layout = new FrameLayout(this);
         layout.setBackgroundColor(Color.BLACK);
-
         imageView = new ImageView(this);
         imageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
         
         statusText = new TextView(this);
-        statusText.setText("Connecting to Host...\nPlease wait.");
+        statusText.setText("Connecting...\nWait for Host to accept.");
         statusText.setTextColor(Color.CYAN);
         statusText.setTextSize(20);
         statusText.setPadding(30, 30, 30, 30);
@@ -48,34 +47,26 @@ public class LiveControlActivity extends AppCompatActivity {
         layout.addView(statusText);
         setContentView(layout);
 
-        DatabaseReference roomRef = FirebaseDatabase.getInstance(MainActivity.DB_URL).getReference("rooms").child(roomId);
+        DatabaseReference roomRef = FirebaseDatabase.getInstance().getReference("rooms").child(roomId);
         screenRef = roomRef.child("screen");
         touchRef = roomRef.child("touch");
         requestRef = roomRef.child("controller_request");
 
-        // Host ko request bhejo
+        // Request bhejo
         requestRef.setValue(true);
 
-        // Screen data listen karo
         screenRef.addValueEventListener(new ValueEventListener() {
             @Override
             public void onDataChange(@NonNull DataSnapshot snapshot) {
                 if (snapshot.exists()) {
                     try {
                         String base64 = snapshot.child("image").getValue(String.class);
-                        hostWidth = snapshot.child("width").getValue(Float.class);
-                        hostHeight = snapshot.child("height").getValue(Float.class);
-                        
                         if (base64 != null) {
                             byte[] decodedString = Base64.decode(base64, Base64.DEFAULT);
                             Bitmap decodedByte = BitmapFactory.decodeByteArray(decodedString, 0, decodedString.length);
-                            
                             runOnUiThread(() -> {
                                 imageView.setImageBitmap(decodedByte);
-                                if(isFirstFrame) {
-                                    statusText.setVisibility(TextView.GONE);
-                                    isFirstFrame = false;
-                                }
+                                if(isFirstFrame) { statusText.setVisibility(TextView.GONE); isFirstFrame = false; }
                             });
                         }
                     } catch (Exception e) { e.printStackTrace(); }
@@ -84,21 +75,14 @@ public class LiveControlActivity extends AppCompatActivity {
             @Override public void onCancelled(@NonNull DatabaseError error) {}
         });
 
-        // Touch events Firebase par bhejo
         imageView.setOnTouchListener((v, event) -> {
             if (event.getAction() == MotionEvent.ACTION_DOWN) {
-                float viewWidth = imageView.getWidth();
-                float viewHeight = imageView.getHeight();
-                if(viewWidth == 0 || viewHeight == 0) return true;
-
-                float xRatio = event.getX() / viewWidth;
-                float yRatio = event.getY() / viewHeight;
-
+                float xRatio = event.getX() / imageView.getWidth();
+                float yRatio = event.getY() / imageView.getHeight();
                 Map<String, Object> touchData = new HashMap<>();
                 touchData.put("xRatio", xRatio);
                 touchData.put("yRatio", yRatio);
                 touchData.put("timestamp", System.currentTimeMillis());
-                
                 touchRef.setValue(touchData);
             }
             return true;
@@ -107,7 +91,6 @@ public class LiveControlActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
-        // Activity band hone par request hatao
         if(requestRef != null) requestRef.setValue(false);
         super.onDestroy();
     }

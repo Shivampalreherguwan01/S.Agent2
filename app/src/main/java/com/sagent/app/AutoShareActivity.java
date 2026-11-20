@@ -15,10 +15,7 @@ public class AutoShareActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         roomId = getIntent().getStringExtra("roomId");
-
-        Toast.makeText(this, "Controller connected! Please accept screen share.", Toast.LENGTH_LONG).show();
-        
-        // MediaProjection ki permission maangein
+        Toast.makeText(this, "Controller connected! Accept screen share.", Toast.LENGTH_LONG).show();
         MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
         startActivityForResult(mpm.createScreenCaptureIntent(), REQUEST_CODE_SCREEN_CAPTURE);
     }
@@ -26,17 +23,18 @@ public class AutoShareActivity extends AppCompatActivity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQUEST_CODE_SCREEN_CAPTURE && resultCode == RESULT_OK) {
-            Intent serviceIntent = new Intent(this, ScreenCaptureService.class);
-            serviceIntent.putExtra("resultCode", resultCode);
-            serviceIntent.putExtra("data", data);
-            serviceIntent.putExtra("roomId", roomId);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(serviceIntent);
+        if (requestCode == REQUEST_CODE_SCREEN_CAPTURE) {
+            if (resultCode == RESULT_OK) {
+                Intent serviceIntent = new Intent(this, ScreenCaptureService.class);
+                serviceIntent.putExtra("resultCode", resultCode);
+                serviceIntent.putExtra("data", data);
+                serviceIntent.putExtra("roomId", roomId);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent);
+                else startService(serviceIntent);
             } else {
-                startService(serviceIntent);
+                Toast.makeText(this, "Screen share denied!", Toast.LENGTH_SHORT).show();
             }
+            finish(); 
         }
-        finish(); // Permission ke baad activity band
     }
 }

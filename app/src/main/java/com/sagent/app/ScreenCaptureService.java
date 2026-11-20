@@ -48,30 +48,23 @@ public class ScreenCaptureService extends Service {
                     .setContentTitle("S.Agent2 Streaming")
                     .setSmallIcon(android.R.drawable.ic_menu_camera)
                     .build();
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
-            } else {
-                startForeground(1, notification);
-            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
+            else startForeground(1, notification);
         }
 
         int resultCode = intent.getIntExtra("resultCode", -1);
         Intent data = intent.getParcelableExtra("data");
         roomId = intent.getStringExtra("roomId");
-
-        screenRef = FirebaseDatabase.getInstance(MainActivity.DB_URL).getReference("rooms").child(roomId).child("screen");
+        screenRef = FirebaseDatabase.getInstance().getReference("rooms").child(roomId).child("screen");
 
         backgroundThread = new HandlerThread("CaptureThread");
         backgroundThread.start();
         backgroundHandler = new Handler(backgroundThread.getLooper());
 
-        if (resultCode != -1 && data != null) {
-            MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
-            mediaProjection = mpm.getMediaProjection(resultCode, data);
-            if (mediaProjection != null) {
-                startScreenCapture();
-            }
-        }
+        MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
+        mediaProjection = mpm.getMediaProjection(resultCode, data);
+        if (mediaProjection != null) startScreenCapture();
+        
         return START_STICKY;
     }
 
@@ -81,15 +74,14 @@ public class ScreenCaptureService extends Service {
             DisplayMetrics metrics = new DisplayMetrics();
             wm.getDefaultDisplay().getMetrics(metrics);
             
-            int width = 360; 
-            int height = 640;
+            // Firebase ke liye bahut chota size (Super Fast)
+            int width = 270; 
+            int height = 480;
             int density = metrics.densityDpi;
 
             imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2);
-            virtualDisplay = mediaProjection.createVirtualDisplay("S.Agent2",
-                    width, height, density,
-                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                    imageReader.getSurface(), null, backgroundHandler);
+            virtualDisplay = mediaProjection.createVirtualDisplay("S.Agent2", width, height, density,
+                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, imageReader.getSurface(), null, backgroundHandler);
 
             imageReader.setOnImageAvailableListener(reader -> {
                 Image image = null;
@@ -97,10 +89,8 @@ public class ScreenCaptureService extends Service {
                     image = reader.acquireLatestImage();
                     if (image != null) {
                         long currentTime = System.currentTimeMillis();
-                        // 250ms = 4 FPS (Smooth enough for control, light on Firebase)
-                        if (currentTime - lastFrameTime < 250) {
-                            image.close();
-                            return;
+                        if (currentTime - lastFrameTime < 300) { // 3 FPS
+                            image.close(); return;
                         }
                         lastFrameTime = currentTime;
 
@@ -112,20 +102,15 @@ public class ScreenCaptureService extends Service {
                         
                         Bitmap bitmap = Bitmap.createBitmap(width + rowPadding / pixelStride, height, Bitmap.Config.ARGB_8888);
                         bitmap.copyPixelsFromBuffer(buffer);
-
                         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                        bitmap.compress(Bitmap.CompressFormat.JPEG, 15, baos); // 15% quality
-                        byte[] byteArray = baos.toByteArray();
-                        String base64Image = Base64.encodeToString(byteArray, Base64.DEFAULT);
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, 10, baos); // 10% Quality (Very light)
+                        String base64Image = Base64.encodeToString(baos.toByteArray(), Base64.DEFAULT);
 
                         Map<String, Object> frameData = new HashMap<>();
                         frameData.put("image", base64Image);
                         frameData.put("width", width);
                         frameData.put("height", height);
-                        
-                        // Firebase par push karo
                         screenRef.setValue(frameData);
-                        
                         bitmap.recycle();
                     }
                 } catch (Exception e) { e.printStackTrace(); } 
@@ -142,6 +127,5 @@ public class ScreenCaptureService extends Service {
         if (backgroundThread != null) backgroundThread.quitSafely();
         super.onDestroy();
     }
-
     @Nullable @Override public IBinder onBind(Intent intent) { return null; }
 }

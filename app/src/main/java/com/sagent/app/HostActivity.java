@@ -25,23 +25,20 @@ public class HostActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         SharedPreferences prefs = getSharedPreferences("SAgentPrefs", Context.MODE_PRIVATE);
-        
         roomId = prefs.getString("roomId", null);
         if (roomId == null) {
             roomId = "SA-" + (100000 + new Random().nextInt(900000));
             prefs.edit().putString("roomId", roomId).apply();
         }
 
-        // Notification & Overlay Permission
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                 requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 2);
             }
         }
         if (!Settings.canDrawOverlays(this)) {
-            Toast.makeText(this, "Please allow 'Display over other apps'", Toast.LENGTH_LONG).show();
-            Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()));
-            startActivity(intent);
+            Toast.makeText(this, "Please allow 'Display over other apps' for auto-popup!", Toast.LENGTH_LONG).show();
+            startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName())));
         }
 
         LinearLayout layout = new LinearLayout(this);
@@ -51,12 +48,12 @@ public class HostActivity extends AppCompatActivity {
         layout.setPadding(50, 50, 50, 50);
 
         TextView title = new TextView(this);
-        title.setText("Host Mode Ready");
+        title.setText("Host Mode Active");
         title.setTextColor(Color.WHITE);
         title.setTextSize(28);
-        
+
         TextView tvCode = new TextView(this);
-        tvCode.setText("Your Code:\n" + roomId);
+        tvCode.setText("Code:\n" + roomId);
         tvCode.setTextColor(Color.parseColor("#00E676"));
         tvCode.setTextSize(36);
         tvCode.setGravity(Gravity.CENTER);
@@ -66,25 +63,21 @@ public class HostActivity extends AppCompatActivity {
         btnAccess.setText("1. ENABLE ACCESSIBILITY");
         btnAccess.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
 
-        Button btnStartService = new Button(this);
-        btnStartService.setText("2. ACTIVATE HOST BACKGROUND SERVICE");
-        btnStartService.setOnClickListener(v -> {
-            // Start background socket service
+        Button btnStart = new Button(this);
+        btnStart.setText("2. START BACKGROUND HOST");
+        btnStart.setOnClickListener(v -> {
             Intent serviceIntent = new Intent(this, HostSocketService.class);
             serviceIntent.putExtra("roomId", roomId);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(serviceIntent);
-            } else {
-                startService(serviceIntent);
-            }
-            Toast.makeText(this, "Host Service Active! You can minimize the app.", Toast.LENGTH_LONG).show();
-            finishAffinity(); // App band kar do
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent);
+            else startService(serviceIntent);
+            Toast.makeText(this, "Host Active! You can minimize the app.", Toast.LENGTH_LONG).show();
+            finishAffinity(); 
         });
 
         layout.addView(title);
         layout.addView(tvCode);
         layout.addView(btnAccess);
-        layout.addView(btnStartService);
+        layout.addView(btnStart);
         setContentView(layout);
     }
 }

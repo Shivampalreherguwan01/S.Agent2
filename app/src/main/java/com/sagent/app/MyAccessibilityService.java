@@ -22,19 +22,15 @@ public class MyAccessibilityService extends AccessibilityService {
         super.onServiceConnected();
         roomId = getSharedPreferences("SAgentPrefs", MODE_PRIVATE).getString("roomId", "SA-123456");
         
-        DatabaseReference touchRef = FirebaseDatabase.getInstance(MainActivity.DB_URL)
-                .getReference("rooms").child(roomId).child("touch");
-
+        DatabaseReference touchRef = FirebaseDatabase.getInstance().getReference("rooms").child(roomId).child("touch");
         touchRef.addValueEventListener(new ValueEventListener() {
             @Override
             public void onDataChange(@NonNull DataSnapshot snapshot) {
                 if (snapshot.exists()) {
                     try {
                         long timestamp = snapshot.child("timestamp").getValue(Long.class);
-                        // Same touch ko baar baar execute hone se rokne ke liye
                         if (timestamp > lastTouchTime) {
                             lastTouchTime = timestamp;
-                            
                             float xRatio = snapshot.child("xRatio").getValue(Float.class);
                             float yRatio = snapshot.child("yRatio").getValue(Float.class);
                             
@@ -42,10 +38,7 @@ public class MyAccessibilityService extends AccessibilityService {
                             DisplayMetrics metrics = new DisplayMetrics();
                             wm.getDefaultDisplay().getMetrics(metrics);
                             
-                            float actualX = xRatio * metrics.widthPixels;
-                            float actualY = yRatio * metrics.heightPixels;
-                            
-                            performClick(actualX, actualY);
+                            performClick(xRatio * metrics.widthPixels, yRatio * metrics.heightPixels);
                         }
                     } catch (Exception e) { e.printStackTrace(); }
                 }
@@ -54,10 +47,8 @@ public class MyAccessibilityService extends AccessibilityService {
         });
     }
 
-    @Override
-    public void onAccessibilityEvent(AccessibilityEvent event) {}
-    @Override
-    public void onInterrupt() {}
+    @Override public void onAccessibilityEvent(AccessibilityEvent event) {}
+    @Override public void onInterrupt() {}
 
     public void performClick(float x, float y) {
         Path path = new Path();

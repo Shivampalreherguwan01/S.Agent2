@@ -5,13 +5,13 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- Ye nayi permission hai jo background se popup aane dega -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
         android:allowBackup="true"
         android:label="S.Agent2"
-        android:usesCleartextTraffic="true" 
+        android:usesCleartextTraffic="true"
         android:theme="@style/Theme.AppCompat.DayNight.NoActionBar">
         
         <activity android:name=".MainActivity" android:exported="true">
@@ -24,16 +24,10 @@
         <activity android:name=".HostActivity" android:exported="false" />
         <activity android:name=".ControllerActivity" android:exported="false" />
         <activity android:name=".LiveControlActivity" android:exported="false" />
-        
-        <!-- Ye nayi transparent activity hai jo permission mangegi -->
+        <!-- Yeh transparent activity popup ke liye hai -->
         <activity android:name=".AutoShareActivity" android:exported="false" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
-        <service
-            android:name=".ScreenCaptureService"
-            android:foregroundServiceType="mediaProjection"
-            android:exported="false" />
-            
-        <!-- Ye nayi service hai jo background mein socket connect rakhegi -->
+        <service android:name=".ScreenCaptureService" android:foregroundServiceType="mediaProjection" android:exported="false" />
         <service android:name=".HostSocketService" android:exported="false" />
 
         <service
