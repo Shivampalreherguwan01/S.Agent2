@@ -12,12 +12,9 @@ import android.widget.TextView;
 import androidx.appcompat.app.AppCompatActivity;
 
 public class MainActivity extends AppCompatActivity {
-    // Koi manual initialization nahi, google-services.json sab sambhal lega
-
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
         SharedPreferences prefs = getSharedPreferences("SAgentPrefs", Context.MODE_PRIVATE);
         String mode = prefs.getString("mode", "none");
 

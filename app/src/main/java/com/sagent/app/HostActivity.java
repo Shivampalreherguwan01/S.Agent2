@@ -25,6 +25,7 @@ public class HostActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         SharedPreferences prefs = getSharedPreferences("SAgentPrefs", Context.MODE_PRIVATE);
+        
         roomId = prefs.getString("roomId", null);
         if (roomId == null) {
             roomId = "SA-" + (100000 + new Random().nextInt(900000));
@@ -36,9 +37,11 @@ public class HostActivity extends AppCompatActivity {
                 requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 2);
             }
         }
+        
         if (!Settings.canDrawOverlays(this)) {
-            Toast.makeText(this, "Please allow 'Display over other apps' for auto-popup!", Toast.LENGTH_LONG).show();
-            startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName())));
+            Toast.makeText(this, "CRITICAL: Please allow 'Display over other apps'", Toast.LENGTH_LONG).show();
+            Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()));
+            startActivity(intent);
         }
 
         LinearLayout layout = new LinearLayout(this);
@@ -48,12 +51,12 @@ public class HostActivity extends AppCompatActivity {
         layout.setPadding(50, 50, 50, 50);
 
         TextView title = new TextView(this);
-        title.setText("Host Mode Active");
+        title.setText("Host Mode Ready");
         title.setTextColor(Color.WHITE);
         title.setTextSize(28);
 
         TextView tvCode = new TextView(this);
-        tvCode.setText("Code:\n" + roomId);
+        tvCode.setText("Your Code:\n" + roomId);
         tvCode.setTextColor(Color.parseColor("#00E676"));
         tvCode.setTextSize(36);
         tvCode.setGravity(Gravity.CENTER);
@@ -66,10 +69,15 @@ public class HostActivity extends AppCompatActivity {
         Button btnStart = new Button(this);
         btnStart.setText("2. START BACKGROUND HOST");
         btnStart.setOnClickListener(v -> {
+            if (!Settings.canDrawOverlays(this)) {
+                Toast.makeText(this, "Please enable 'Display over other apps' first!", Toast.LENGTH_LONG).show();
+                return;
+            }
             Intent serviceIntent = new Intent(this, HostSocketService.class);
             serviceIntent.putExtra("roomId", roomId);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent);
             else startService(serviceIntent);
+            
             Toast.makeText(this, "Host Active! You can minimize the app.", Toast.LENGTH_LONG).show();
             finishAffinity(); 
         });

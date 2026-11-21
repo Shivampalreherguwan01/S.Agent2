@@ -20,6 +20,7 @@ import android.os.HandlerThread;
 import android.os.IBinder;
 import android.util.Base64;
 import android.util.DisplayMetrics;
+import android.util.Log;
 import android.view.WindowManager;
 import androidx.annotation.Nullable;
 import com.google.firebase.database.DatabaseReference;
@@ -38,6 +39,7 @@ public class ScreenCaptureService extends Service {
     private long lastFrameTime = 0;
     private HandlerThread backgroundThread;
     private Handler backgroundHandler;
+    private boolean isFirstWrite = true;
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
@@ -48,13 +50,21 @@ public class ScreenCaptureService extends Service {
                     .setContentTitle("S.Agent2 Streaming")
                     .setSmallIcon(android.R.drawable.ic_menu_camera)
                     .build();
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
-            else startForeground(1, notification);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
+            } else {
+                startForeground(1, notification);
+            }
         }
 
         int resultCode = intent.getIntExtra("resultCode", -1);
         Intent data = intent.getParcelableExtra("data");
         roomId = intent.getStringExtra("roomId");
+        
+        if (roomId == null || resultCode == -1 || data == null) {
+            stopSelf(); return START_NOT_STICKY;
+        }
+
         screenRef = FirebaseDatabase.getInstance().getReference("rooms").child(roomId).child("screen");
 
         backgroundThread = new HandlerThread("CaptureThread");
@@ -63,7 +73,20 @@ public class ScreenCaptureService extends Service {
 
         MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
         mediaProjection = mpm.getMediaProjection(resultCode, data);
-        if (mediaProjection != null) startScreenCapture();
+        
+        if (mediaProjection != null) {
+            mediaProjection.registerCallback(new MediaProjection.Callback() {
+                @Override
+                public void onStop() {
+                    super.onStop();
+                    stopSelf();
+                }
+            }, backgroundHandler);
+
+            startScreenCapture();
+        } else {
+            stopSelf();
+        }
         
         return START_STICKY;
     }
@@ -74,7 +97,6 @@ public class ScreenCaptureService extends Service {
             DisplayMetrics metrics = new DisplayMetrics();
             wm.getDefaultDisplay().getMetrics(metrics);
             
-            // Firebase ke liye bahut chota size (Super Fast)
             int width = 270; 
             int height = 480;
             int density = metrics.densityDpi;
@@ -89,7 +111,7 @@ public class ScreenCaptureService extends Service {
                     image = reader.acquireLatestImage();
                     if (image != null) {
                         long currentTime = System.currentTimeMillis();
-                        if (currentTime - lastFrameTime < 300) { // 3 FPS
+                        if (currentTime - lastFrameTime < 300) {
                             image.close(); return;
                         }
                         lastFrameTime = currentTime;
@@ -103,14 +125,24 @@ public class ScreenCaptureService extends Service {
                         Bitmap bitmap = Bitmap.createBitmap(width + rowPadding / pixelStride, height, Bitmap.Config.ARGB_8888);
                         bitmap.copyPixelsFromBuffer(buffer);
                         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                        bitmap.compress(Bitmap.CompressFormat.JPEG, 10, baos); // 10% Quality (Very light)
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, 10, baos);
                         String base64Image = Base64.encodeToString(baos.toByteArray(), Base64.DEFAULT);
 
                         Map<String, Object> frameData = new HashMap<>();
                         frameData.put("image", base64Image);
                         frameData.put("width", width);
                         frameData.put("height", height);
-                        screenRef.setValue(frameData);
+                        frameData.put("timestamp", currentTime);
+                        
+                        screenRef.setValue(frameData).addOnCompleteListener(task -> {
+                            if (!task.isSuccessful()) {
+                                Log.e("ScreenCapture", "Firebase Write Failed!", task.getException());
+                            } else if (isFirstWrite) {
+                                Log.d("ScreenCapture", "First frame written to Firebase successfully!");
+                                isFirstWrite = false;
+                            }
+                        });
+                        
                         bitmap.recycle();
                     }
                 } catch (Exception e) { e.printStackTrace(); } 

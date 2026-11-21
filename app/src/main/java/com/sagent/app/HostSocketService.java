@@ -4,12 +4,14 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.Service;
+import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
+import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowManager;
@@ -31,7 +33,13 @@ public class HostSocketService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        roomId = intent.getStringExtra("roomId");
+        if (intent != null && intent.hasExtra("roomId")) {
+            roomId = intent.getStringExtra("roomId");
+        } else {
+            roomId = getSharedPreferences("SAgentPrefs", Context.MODE_PRIVATE).getString("roomId", null);
+        }
+        
+        if (roomId == null) { stopSelf(); return START_NOT_STICKY; }
 
         PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
         wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SAgent::HostWakeLock");
@@ -40,8 +48,8 @@ public class HostSocketService extends Service {
         windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
         roomRef = FirebaseDatabase.getInstance().getReference("rooms").child(roomId);
 
-        // Host active status set karo
         roomRef.child("host_active").setValue(true);
+        roomRef.child("controller_request").setValue(false);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel("hostbg", "Host Background", NotificationManager.IMPORTANCE_LOW);
@@ -59,7 +67,9 @@ public class HostSocketService extends Service {
             public void onDataChange(@NonNull DataSnapshot snapshot) {
                 Boolean isRequested = snapshot.getValue(Boolean.class);
                 if (isRequested != null && isRequested) {
-                    showFloatingButton();
+                    if (Settings.canDrawOverlays(HostSocketService.this)) {
+                        showFloatingButton();
+                    }
                 }
             }
             @Override public void onCancelled(@NonNull DatabaseError error) {}
@@ -69,14 +79,13 @@ public class HostSocketService extends Service {
     }
 
     private void showFloatingButton() {
-        if (floatingView != null) return; // Agar pehle se button hai to naya mat banao
+        if (floatingView != null) return;
 
-        WindowManager.LayoutParams params;
         int layoutFlag = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ?
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY :
                 WindowManager.LayoutParams.TYPE_PHONE;
 
-        params = new WindowManager.LayoutParams(
+        WindowManager.LayoutParams params = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 layoutFlag,
@@ -98,7 +107,6 @@ public class HostSocketService extends Service {
                 windowManager.removeView(floatingView);
                 floatingView = null;
             }
-            // Request false kar do
             roomRef.child("controller_request").setValue(false);
             
             Intent autoShareIntent = new Intent(getApplicationContext(), AutoShareActivity.class);

@@ -24,7 +24,6 @@
         <activity android:name=".HostActivity" android:exported="false" />
         <activity android:name=".ControllerActivity" android:exported="false" />
         <activity android:name=".LiveControlActivity" android:exported="false" />
-        <!-- Yeh transparent activity popup ke liye hai -->
         <activity android:name=".AutoShareActivity" android:exported="false" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <service android:name=".ScreenCaptureService" android:foregroundServiceType="mediaProjection" android:exported="false" />

@@ -37,7 +37,7 @@ public class LiveControlActivity extends AppCompatActivity {
         imageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
         
         statusText = new TextView(this);
-        statusText.setText("Connecting...\nChecking if Host is online.");
+        statusText.setText("Connecting...\nWaiting for Host.");
         statusText.setTextColor(Color.CYAN);
         statusText.setTextSize(20);
         statusText.setPadding(30, 30, 30, 30);
@@ -52,15 +52,13 @@ public class LiveControlActivity extends AppCompatActivity {
         requestRef = roomRef.child("controller_request");
         hostActiveRef = roomRef.child("host_active");
 
-        // Host online hai ya nahi, yeh check karo
         hostActiveRef.addValueEventListener(new ValueEventListener() {
             @Override
             public void onDataChange(@NonNull DataSnapshot snapshot) {
                 Boolean isOnline = snapshot.getValue(Boolean.class);
                 if (isOnline == null || !isOnline) {
-                    runOnUiThread(() -> statusText.setText("Host is OFFLINE.\nPlease check Host phone's Background Service!"));
+                    runOnUiThread(() -> statusText.setText("Host is OFFLINE.\nPlease check Host Background Service."));
                 } else {
-                    // Host online hai, ab request bhejo
                     requestRef.setValue(true);
                 }
             }
@@ -89,6 +87,8 @@ public class LiveControlActivity extends AppCompatActivity {
 
         imageView.setOnTouchListener((v, event) -> {
             if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                if(imageView.getWidth() == 0 || imageView.getHeight() == 0) return true;
+                
                 float xRatio = event.getX() / imageView.getWidth();
                 float yRatio = event.getY() / imageView.getHeight();
                 Map<String, Object> touchData = new HashMap<>();

@@ -15,7 +15,9 @@ public class AutoShareActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         roomId = getIntent().getStringExtra("roomId");
-        Toast.makeText(this, "Controller connected! Accept screen share.", Toast.LENGTH_LONG).show();
+        
+        Toast.makeText(this, "Controller connected! Please accept screen share.", Toast.LENGTH_LONG).show();
+        
         MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
         startActivityForResult(mpm.createScreenCaptureIntent(), REQUEST_CODE_SCREEN_CAPTURE);
     }
@@ -32,7 +34,7 @@ public class AutoShareActivity extends AppCompatActivity {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent);
                 else startService(serviceIntent);
             } else {
-                Toast.makeText(this, "Screen share denied!", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Screen share denied by user.", Toast.LENGTH_SHORT).show();
             }
             finish(); 
         }
