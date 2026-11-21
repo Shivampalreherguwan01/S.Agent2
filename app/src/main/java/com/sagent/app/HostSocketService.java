@@ -11,7 +11,6 @@ import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
 import android.view.Gravity;
-import android.view.LayoutInflater;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.Button;
@@ -26,20 +25,23 @@ import com.google.firebase.database.ValueEventListener;
 public class HostSocketService extends Service {
     private String roomId;
     private PowerManager.WakeLock wakeLock;
-    private boolean isPopupShown = false;
     private WindowManager windowManager;
     private View floatingView;
+    private DatabaseReference roomRef;
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         roomId = intent.getStringExtra("roomId");
 
-        // CPU ko jagaye rakhne ke liye WakeLock
         PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
         wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SAgent::HostWakeLock");
         wakeLock.acquire();
 
         windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
+        roomRef = FirebaseDatabase.getInstance().getReference("rooms").child(roomId);
+
+        // Host active status set karo
+        roomRef.child("host_active").setValue(true);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel("hostbg", "Host Background", NotificationManager.IMPORTANCE_LOW);
@@ -52,16 +54,12 @@ public class HostSocketService extends Service {
             startForeground(2, notification);
         }
 
-        DatabaseReference requestRef = FirebaseDatabase.getInstance().getReference("rooms").child(roomId).child("controller_request");
-
-        // Firebase par request listen karo
-        requestRef.addValueEventListener(new ValueEventListener() {
+        roomRef.child("controller_request").addValueEventListener(new ValueEventListener() {
             @Override
             public void onDataChange(@NonNull DataSnapshot snapshot) {
                 Boolean isRequested = snapshot.getValue(Boolean.class);
-                if (isRequested != null && isRequested && !isPopupShown) {
-                    isPopupShown = true;
-                    showFloatingButton(); // Popup ki jagah Floating Button dikhao
+                if (isRequested != null && isRequested) {
+                    showFloatingButton();
                 }
             }
             @Override public void onCancelled(@NonNull DatabaseError error) {}
@@ -71,42 +69,38 @@ public class HostSocketService extends Service {
     }
 
     private void showFloatingButton() {
-        // Floating Window banane ka code
+        if (floatingView != null) return; // Agar pehle se button hai to naya mat banao
+
         WindowManager.LayoutParams params;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            params = new WindowManager.LayoutParams(
-                    WindowManager.LayoutParams.WRAP_CONTENT,
-                    WindowManager.LayoutParams.WRAP_CONTENT,
-                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-                    PixelFormat.TRANSLUCENT);
-        } else {
-            params = new WindowManager.LayoutParams(
-                    WindowManager.LayoutParams.WRAP_CONTENT,
-                    WindowManager.LayoutParams.WRAP_CONTENT,
-                    WindowManager.LayoutParams.TYPE_PHONE,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-                    PixelFormat.TRANSLUCENT);
-        }
+        int layoutFlag = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ?
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY :
+                WindowManager.LayoutParams.TYPE_PHONE;
+
+        params = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                layoutFlag,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                PixelFormat.TRANSLUCENT);
 
         params.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
-        params.y = 100; // Screen ke top se thoda neeche
+        params.y = 100;
 
-        // Button Design
         Button acceptBtn = new Button(this);
         acceptBtn.setText("CONTROLLER CONNECTED!\nTap to Share Screen");
-        acceptBtn.setBackgroundColor(Color.parseColor("#00E676")); // Green
+        acceptBtn.setBackgroundColor(Color.parseColor("#00E676"));
         acceptBtn.setTextColor(Color.BLACK);
         acceptBtn.setPadding(30, 30, 30, 30);
         acceptBtn.setTextSize(16);
 
         acceptBtn.setOnClickListener(v -> {
-            // Button hatado
             if (floatingView != null) {
                 windowManager.removeView(floatingView);
                 floatingView = null;
             }
-            // Permission Activity kholo
+            // Request false kar do
+            roomRef.child("controller_request").setValue(false);
+            
             Intent autoShareIntent = new Intent(getApplicationContext(), AutoShareActivity.class);
             autoShareIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
             autoShareIntent.putExtra("roomId", roomId);
@@ -124,11 +118,10 @@ public class HostSocketService extends Service {
 
     @Override
     public void onDestroy() {
+        if (roomRef != null) roomRef.child("host_active").setValue(false);
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
         if (floatingView != null && windowManager != null) {
-            try {
-                windowManager.removeView(floatingView);
-            } catch (Exception e) { e.printStackTrace(); }
+            try { windowManager.removeView(floatingView); } catch (Exception e) {}
         }
         super.onDestroy();
     }

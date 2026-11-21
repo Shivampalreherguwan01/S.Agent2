@@ -10,24 +10,13 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import androidx.appcompat.app.AppCompatActivity;
-import com.google.firebase.FirebaseApp;
-import com.google.firebase.FirebaseOptions;
 
 public class MainActivity extends AppCompatActivity {
-    public static final String DB_URL = "https://fir-agent2-56832-default-rtdb.firebaseio.com";
+    // Koi manual initialization nahi, google-services.json sab sambhal lega
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
-        // Firebase ko manually initialize karna (Bina google-services.json ke)
-        if (FirebaseApp.getApps(this).isEmpty()) {
-            FirebaseOptions options = new FirebaseOptions.Builder()
-                    .setApplicationId("1:1234567890:android:1234567890") // Dummy ID
-                    .setDatabaseUrl(DB_URL)
-                    .build();
-            FirebaseApp.initializeApp(this, options);
-        }
 
         SharedPreferences prefs = getSharedPreferences("SAgentPrefs", Context.MODE_PRIVATE);
         String mode = prefs.getString("mode", "none");

@@ -23,8 +23,7 @@ public class LiveControlActivity extends AppCompatActivity {
     private String roomId;
     private ImageView imageView;
     private TextView statusText;
-    private DatabaseReference screenRef, touchRef, requestRef;
-    private float hostWidth = 270f, hostHeight = 480f;
+    private DatabaseReference screenRef, touchRef, requestRef, hostActiveRef;
     private boolean isFirstFrame = true;
 
     @Override
@@ -38,7 +37,7 @@ public class LiveControlActivity extends AppCompatActivity {
         imageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
         
         statusText = new TextView(this);
-        statusText.setText("Connecting...\nWait for Host to accept.");
+        statusText.setText("Connecting...\nChecking if Host is online.");
         statusText.setTextColor(Color.CYAN);
         statusText.setTextSize(20);
         statusText.setPadding(30, 30, 30, 30);
@@ -51,9 +50,22 @@ public class LiveControlActivity extends AppCompatActivity {
         screenRef = roomRef.child("screen");
         touchRef = roomRef.child("touch");
         requestRef = roomRef.child("controller_request");
+        hostActiveRef = roomRef.child("host_active");
 
-        // Request bhejo
-        requestRef.setValue(true);
+        // Host online hai ya nahi, yeh check karo
+        hostActiveRef.addValueEventListener(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot snapshot) {
+                Boolean isOnline = snapshot.getValue(Boolean.class);
+                if (isOnline == null || !isOnline) {
+                    runOnUiThread(() -> statusText.setText("Host is OFFLINE.\nPlease check Host phone's Background Service!"));
+                } else {
+                    // Host online hai, ab request bhejo
+                    requestRef.setValue(true);
+                }
+            }
+            @Override public void onCancelled(@NonNull DatabaseError error) {}
+        });
 
         screenRef.addValueEventListener(new ValueEventListener() {
             @Override
