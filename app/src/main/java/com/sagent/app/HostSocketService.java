@@ -6,6 +6,7 @@ import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ServiceInfo;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.os.Build;
@@ -33,9 +34,11 @@ public class HostSocketService extends Service {
     private WindowManager windowManager;
     private View floatingView;
     private DatabaseReference roomRef;
+    private ValueEventListener requestListener; // PDF Point 13 fix
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        // PDF Point 4 fix: Intent null handling
         if (intent != null && intent.hasExtra("roomId")) {
             roomId = intent.getStringExtra("roomId");
         } else {
@@ -45,8 +48,10 @@ public class HostSocketService extends Service {
         if (roomId == null) { stopSelf(); return START_NOT_STICKY; }
 
         PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
-        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SAgent::HostWakeLock");
-        wakeLock.acquire();
+        if (wakeLock == null) {
+            wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SAgent::HostWakeLock");
+            wakeLock.acquire();
+        }
 
         windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
         roomRef = FirebaseDatabase.getInstance().getReference("rooms").child(roomId);
@@ -62,13 +67,17 @@ public class HostSocketService extends Service {
                     .setContentText("Waiting for controller...")
                     .setSmallIcon(android.R.drawable.ic_menu_view)
                     .build();
-            startForeground(2, notification);
+            
+            // PDF Point 2 fix: Foreground service type
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(2, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
+            } else {
+                startForeground(2, notification);
+            }
         }
-        
-        // Debugging ke liye Toast
-        new Handler(Looper.getMainLooper()).post(() -> Toast.makeText(getApplicationContext(), "Host Background Service Started Successfully", Toast.LENGTH_SHORT).show());
 
-        roomRef.child("controller_request").addValueEventListener(new ValueEventListener() {
+        // Listener ko variable mein save kiya
+        requestListener = new ValueEventListener() {
             @Override
             public void onDataChange(@NonNull DataSnapshot snapshot) {
                 Boolean isRequested = snapshot.getValue(Boolean.class);
@@ -81,7 +90,8 @@ public class HostSocketService extends Service {
                 }
             }
             @Override public void onCancelled(@NonNull DatabaseError error) {}
-        });
+        };
+        roomRef.child("controller_request").addValueEventListener(requestListener);
 
         return START_STICKY;
     }
@@ -134,7 +144,11 @@ public class HostSocketService extends Service {
 
     @Override
     public void onDestroy() {
-        if (roomRef != null) roomRef.child("host_active").setValue(false);
+        // PDF Point 13 fix: Listener remove karna zaroori hai
+        if (roomRef != null && requestListener != null) {
+            roomRef.child("controller_request").removeEventListener(requestListener);
+            roomRef.child("host_active").setValue(false);
+        }
         if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
         if (floatingView != null && windowManager != null) {
             try { windowManager.removeView(floatingView); } catch (Exception e) {}

@@ -25,6 +25,7 @@ public class LiveControlActivity extends AppCompatActivity {
     private ImageView imageView;
     private TextView statusText;
     private DatabaseReference screenRef, touchRef, requestRef, hostActiveRef;
+    private ValueEventListener screenListener, hostListener; // Listener references
     private boolean isFirstFrame = true;
 
     @Override
@@ -53,7 +54,7 @@ public class LiveControlActivity extends AppCompatActivity {
         requestRef = roomRef.child("controller_request");
         hostActiveRef = roomRef.child("host_active");
 
-        hostActiveRef.addValueEventListener(new ValueEventListener() {
+        hostListener = new ValueEventListener() {
             @Override
             public void onDataChange(@NonNull DataSnapshot snapshot) {
                 Boolean isOnline = snapshot.getValue(Boolean.class);
@@ -64,38 +65,35 @@ public class LiveControlActivity extends AppCompatActivity {
                 }
             }
             @Override public void onCancelled(@NonNull DatabaseError error) {}
-        });
+        };
+        hostActiveRef.addValueEventListener(hostListener);
 
-        screenRef.addValueEventListener(new ValueEventListener() {
+        screenListener = new ValueEventListener() {
             @Override
             public void onDataChange(@NonNull DataSnapshot snapshot) {
                 if (snapshot.exists()) {
                     try {
                         String base64 = snapshot.child("image").getValue(String.class);
                         if (base64 != null) {
-                            // Fix: NO_WRAP decode
                             byte[] decodedString = Base64.decode(base64, Base64.NO_WRAP);
                             Bitmap decodedByte = BitmapFactory.decodeByteArray(decodedString, 0, decodedString.length);
-                            
                             if (decodedByte != null) {
                                 runOnUiThread(() -> {
                                     imageView.setImageBitmap(decodedByte);
                                     if(isFirstFrame) { statusText.setVisibility(TextView.GONE); isFirstFrame = false; }
                                 });
-                            } else {
-                                Log.e("Controller", "Bitmap decode failed!");
                             }
                         }
-                    } catch (Exception e) { 
-                        Log.e("Controller", "Exception decoding image", e);
-                    }
+                    } catch (Exception e) { Log.e("Controller", "Decode Error", e); }
                 }
             }
             @Override public void onCancelled(@NonNull DatabaseError error) {}
-        });
+        };
+        screenRef.addValueEventListener(screenListener);
 
+        // PDF Point 11 fix: ACTION_DOWN, ACTION_MOVE aur ACTION_UP sab handle kiye
         imageView.setOnTouchListener((v, event) -> {
-            if (event.getAction() == MotionEvent.ACTION_DOWN) {
+            if (event.getAction() == MotionEvent.ACTION_DOWN || event.getAction() == MotionEvent.ACTION_MOVE) {
                 if(imageView.getWidth() == 0 || imageView.getHeight() == 0) return true;
                 
                 float xRatio = event.getX() / imageView.getWidth();
@@ -104,6 +102,7 @@ public class LiveControlActivity extends AppCompatActivity {
                 touchData.put("xRatio", xRatio);
                 touchData.put("yRatio", yRatio);
                 touchData.put("timestamp", System.currentTimeMillis());
+                touchData.put("action", event.getAction()); // Action bhi bhej rahe hain
                 touchRef.setValue(touchData);
             }
             return true;
@@ -112,7 +111,10 @@ public class LiveControlActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
-        if(requestRef != null) requestRef.setValue(false);
+        // PDF Point 14 fix: Listeners clear karna zaroori hai
+        if (requestRef != null) requestRef.setValue(false);
+        if (hostActiveRef != null && hostListener != null) hostActiveRef.removeEventListener(hostListener);
+        if (screenRef != null && screenListener != null) screenRef.removeEventListener(screenListener);
         super.onDestroy();
     }
 }
