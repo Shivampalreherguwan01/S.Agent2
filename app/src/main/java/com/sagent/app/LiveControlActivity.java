@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.util.Base64;
+import android.util.Log;
 import android.view.MotionEvent;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
@@ -72,14 +73,22 @@ public class LiveControlActivity extends AppCompatActivity {
                     try {
                         String base64 = snapshot.child("image").getValue(String.class);
                         if (base64 != null) {
-                            byte[] decodedString = Base64.decode(base64, Base64.DEFAULT);
+                            // Fix: NO_WRAP decode
+                            byte[] decodedString = Base64.decode(base64, Base64.NO_WRAP);
                             Bitmap decodedByte = BitmapFactory.decodeByteArray(decodedString, 0, decodedString.length);
-                            runOnUiThread(() -> {
-                                imageView.setImageBitmap(decodedByte);
-                                if(isFirstFrame) { statusText.setVisibility(TextView.GONE); isFirstFrame = false; }
-                            });
+                            
+                            if (decodedByte != null) {
+                                runOnUiThread(() -> {
+                                    imageView.setImageBitmap(decodedByte);
+                                    if(isFirstFrame) { statusText.setVisibility(TextView.GONE); isFirstFrame = false; }
+                                });
+                            } else {
+                                Log.e("Controller", "Bitmap decode failed!");
+                            }
                         }
-                    } catch (Exception e) { e.printStackTrace(); }
+                    } catch (Exception e) { 
+                        Log.e("Controller", "Exception decoding image", e);
+                    }
                 }
             }
             @Override public void onCancelled(@NonNull DatabaseError error) {}

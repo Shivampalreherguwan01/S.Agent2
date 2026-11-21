@@ -9,13 +9,16 @@ import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.os.PowerManager;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.Button;
+import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import com.google.firebase.database.DataSnapshot;
@@ -61,6 +64,9 @@ public class HostSocketService extends Service {
                     .build();
             startForeground(2, notification);
         }
+        
+        // Debugging ke liye Toast
+        new Handler(Looper.getMainLooper()).post(() -> Toast.makeText(getApplicationContext(), "Host Background Service Started Successfully", Toast.LENGTH_SHORT).show());
 
         roomRef.child("controller_request").addValueEventListener(new ValueEventListener() {
             @Override
@@ -69,6 +75,8 @@ public class HostSocketService extends Service {
                 if (isRequested != null && isRequested) {
                     if (Settings.canDrawOverlays(HostSocketService.this)) {
                         showFloatingButton();
+                    } else {
+                        new Handler(Looper.getMainLooper()).post(() -> Toast.makeText(getApplicationContext(), "Overlay Permission Missing!", Toast.LENGTH_LONG).show());
                     }
                 }
             }

@@ -122,11 +122,23 @@ public class ScreenCaptureService extends Service {
                         int rowStride = planes[0].getRowStride();
                         int rowPadding = rowStride - pixelStride * width;
                         
-                        Bitmap bitmap = Bitmap.createBitmap(width + rowPadding / pixelStride, height, Bitmap.Config.ARGB_8888);
-                        bitmap.copyPixelsFromBuffer(buffer);
+                        // Fix: Bitmap padding issue
+                        Bitmap bitmap;
+                        if (rowPadding == 0) {
+                            bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+                            bitmap.copyPixelsFromBuffer(buffer);
+                        } else {
+                            Bitmap paddedBitmap = Bitmap.createBitmap(width + rowPadding / pixelStride, height, Bitmap.Config.ARGB_8888);
+                            paddedBitmap.copyPixelsFromBuffer(buffer);
+                            bitmap = Bitmap.createBitmap(paddedBitmap, 0, 0, width, height);
+                            paddedBitmap.recycle();
+                        }
+
                         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                        bitmap.compress(Bitmap.CompressFormat.JPEG, 10, baos);
-                        String base64Image = Base64.encodeToString(baos.toByteArray(), Base64.DEFAULT);
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, 30, baos); // Quality 30% for better visibility
+                        
+                        // Fix: Base64 NO_WRAP issue
+                        String base64Image = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
 
                         Map<String, Object> frameData = new HashMap<>();
                         frameData.put("image", base64Image);
