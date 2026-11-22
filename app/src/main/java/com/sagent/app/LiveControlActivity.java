@@ -38,23 +38,23 @@ public class LiveControlActivity extends AppCompatActivity {
     private long lastFrameReceivedTime = 0;
     private Handler reconnectHandler = new Handler(Looper.getMainLooper());
     private Runnable reconnectRunnable;
+    private boolean isConnected = false; // Naya flag
 
-    // Colors (From Image)
-    private final int bgColor = Color.parseColor("#0B0C10"); // Very Dark Blue
-    private final int panelColor = Color.parseColor("#1F2833"); // Dark Greyish Blue
-    private final int accentCyan = Color.parseColor("#45A29E"); // Teal/Cyan
-    private final int btnColor = Color.parseColor("#2A2D34"); // Button Grey
+    // Colors
+    private final int bgColor = Color.parseColor("#0B0C10"); 
+    private final int panelColor = Color.parseColor("#1F2833"); 
+    private final int accentCyan = Color.parseColor("#45A29E"); 
+    private final int btnColor = Color.parseColor("#2A2D34"); 
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         roomId = getIntent().getStringExtra("roomId");
 
-        // --- ROOT LAYOUT ---
         RelativeLayout rootLayout = new RelativeLayout(this);
         rootLayout.setBackgroundColor(bgColor);
 
-        // --- TOP BAR ---
+        // TOP BAR
         RelativeLayout topBar = new RelativeLayout(this);
         topBar.setId(View.generateViewId());
         topBar.setBackgroundColor(panelColor);
@@ -76,6 +76,11 @@ public class LiveControlActivity extends AppCompatActivity {
         discParams.addRule(RelativeLayout.ALIGN_PARENT_RIGHT);
         discParams.addRule(RelativeLayout.CENTER_VERTICAL);
         tvDisconnect.setLayoutParams(discParams);
+        
+        tvDisconnect.setOnClickListener(v -> {
+            if(requestRef != null) requestRef.setValue(false);
+            finish();
+        });
 
         topBar.addView(tvHostName);
         topBar.addView(tvDisconnect);
@@ -85,16 +90,15 @@ public class LiveControlActivity extends AppCompatActivity {
         topParams.addRule(RelativeLayout.ALIGN_PARENT_TOP);
         rootLayout.addView(topBar, topParams);
 
-        // --- MAIN SCREEN VIEW ---
+        // MAIN SCREEN
         imageView = new ImageView(this);
         imageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
         RelativeLayout.LayoutParams imgParams = new RelativeLayout.LayoutParams(
                 RelativeLayout.LayoutParams.MATCH_PARENT, RelativeLayout.LayoutParams.MATCH_PARENT);
         imgParams.addRule(RelativeLayout.BELOW, topBar.getId());
-        imgParams.bottomMargin = 400; // Space for bottom controls
+        imgParams.bottomMargin = 400; 
         rootLayout.addView(imageView, imgParams);
 
-        // Status Text Overlay
         statusText = new TextView(this);
         statusText.setText("Connecting...\nWaiting for Screen.");
         statusText.setTextColor(accentCyan);
@@ -105,14 +109,13 @@ public class LiveControlActivity extends AppCompatActivity {
         statusParams.addRule(RelativeLayout.CENTER_IN_PARENT);
         rootLayout.addView(statusText, statusParams);
 
-        // --- BOTTOM CONTROL PANEL ---
+        // BOTTOM PANEL
         LinearLayout bottomPanel = new LinearLayout(this);
         bottomPanel.setOrientation(LinearLayout.HORIZONTAL);
         bottomPanel.setGravity(Gravity.CENTER_VERTICAL);
         bottomPanel.setPadding(30, 30, 30, 30);
         bottomPanel.setBackgroundColor(panelColor);
 
-        // 1. D-Pad (Left Side)
         FrameLayout dpadLayout = new FrameLayout(this);
         LinearLayout.LayoutParams dpadParams = new LinearLayout.LayoutParams(0, 350, 1f);
         dpadLayout.setLayoutParams(dpadParams);
@@ -146,7 +149,6 @@ public class LiveControlActivity extends AppCompatActivity {
         dpadLayout.addView(btnRight, paramsRight);
         dpadLayout.addView(btnCenter, paramsCenter);
 
-        // 2. Navigation Buttons (Right Side)
         LinearLayout navLayout = new LinearLayout(this);
         navLayout.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams navParams = new LinearLayout.LayoutParams(0, 350, 1f);
@@ -184,7 +186,7 @@ public class LiveControlActivity extends AppCompatActivity {
 
         setContentView(rootLayout);
 
-        // --- FIREBASE LOGIC & AUTO-RECONNECT ---
+        // FIREBASE
         DatabaseReference roomRef = FirebaseDatabase.getInstance().getReference("rooms").child(roomId);
         screenRef = roomRef.child("screen");
         touchRef = roomRef.child("touch");
@@ -202,10 +204,11 @@ public class LiveControlActivity extends AppCompatActivity {
                         statusText.setVisibility(View.VISIBLE);
                         statusText.setText("Host is Offline.\nCheck Host Phone.");
                     });
+                    isConnected = false;
                 } else {
                     tvHostName.setText("Device: Connected");
                     tvHostName.setTextColor(Color.WHITE);
-                    requestRef.setValue(true);
+                    if(!isConnected) requestRef.setValue(true); // Sirf tab bhejo jab connected na ho
                 }
             }
             @Override public void onCancelled(@NonNull DatabaseError error) {}
@@ -223,6 +226,7 @@ public class LiveControlActivity extends AppCompatActivity {
                             Bitmap decodedByte = BitmapFactory.decodeByteArray(decodedString, 0, decodedString.length);
                             if (decodedByte != null) {
                                 lastFrameReceivedTime = System.currentTimeMillis();
+                                isConnected = true; // Screen mil gayi, ab request mat bhejo
                                 runOnUiThread(() -> {
                                     imageView.setImageBitmap(decodedByte);
                                     if(isFirstFrame) { 
@@ -239,19 +243,18 @@ public class LiveControlActivity extends AppCompatActivity {
         };
         screenRef.addValueEventListener(screenListener);
 
-        // Auto Reconnect Checker (Har 5 second mein check karega agar screen atki hai)
+        // Reconnect Logic: Sirf tab request bhejo jab screen na mil rahi ho
         reconnectRunnable = new Runnable() {
             @Override
             public void run() {
-                if (System.currentTimeMillis() - lastFrameReceivedTime > 5000) {
-                    requestRef.setValue(true); // Dobara request bhejega
+                if (!isConnected && System.currentTimeMillis() - lastFrameReceivedTime > 5000) {
+                    requestRef.setValue(true); 
                 }
                 reconnectHandler.postDelayed(this, 5000);
             }
         };
         reconnectHandler.post(reconnectRunnable);
 
-        // --- TOUCH LOGIC ---
         imageView.setOnTouchListener((v, event) -> {
             if (imageView.getDrawable() == null) return true;
 

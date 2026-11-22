@@ -34,11 +34,10 @@ public class HostSocketService extends Service {
     private WindowManager windowManager;
     private View floatingView;
     private DatabaseReference roomRef;
-    private ValueEventListener requestListener; // PDF Point 13 fix
+    private ValueEventListener requestListener;
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        // PDF Point 4 fix: Intent null handling
         if (intent != null && intent.hasExtra("roomId")) {
             roomId = intent.getStringExtra("roomId");
         } else {
@@ -68,7 +67,6 @@ public class HostSocketService extends Service {
                     .setSmallIcon(android.R.drawable.ic_menu_view)
                     .build();
             
-            // PDF Point 2 fix: Foreground service type
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(2, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
             } else {
@@ -76,12 +74,17 @@ public class HostSocketService extends Service {
             }
         }
 
-        // Listener ko variable mein save kiya
         requestListener = new ValueEventListener() {
             @Override
             public void onDataChange(@NonNull DataSnapshot snapshot) {
                 Boolean isRequested = snapshot.getValue(Boolean.class);
                 if (isRequested != null && isRequested) {
+                    // Agar pehle se screen share chal raha hai, to button mat dikhao
+                    Boolean isStreaming = snapshot.getRef().getParent().child("is_streaming").getValue(Boolean.class);
+                    if (isStreaming != null && isStreaming) {
+                        return; 
+                    }
+
                     if (Settings.canDrawOverlays(HostSocketService.this)) {
                         showFloatingButton();
                     } else {
@@ -121,10 +124,12 @@ public class HostSocketService extends Service {
         acceptBtn.setTextSize(16);
 
         acceptBtn.setOnClickListener(v -> {
+            // Button turant hatao
             if (floatingView != null) {
                 windowManager.removeView(floatingView);
                 floatingView = null;
             }
+            // Request false karo taaki wapas na aaye
             roomRef.child("controller_request").setValue(false);
             
             Intent autoShareIntent = new Intent(getApplicationContext(), AutoShareActivity.class);
@@ -144,7 +149,6 @@ public class HostSocketService extends Service {
 
     @Override
     public void onDestroy() {
-        // PDF Point 13 fix: Listener remove karna zaroori hai
         if (roomRef != null && requestListener != null) {
             roomRef.child("controller_request").removeEventListener(requestListener);
             roomRef.child("host_active").setValue(false);
