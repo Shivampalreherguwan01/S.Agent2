@@ -38,19 +38,16 @@ public class MyAccessibilityService extends AccessibilityService {
                         if (timestamp <= lastTouchTime) return;
                         lastTouchTime = timestamp;
 
-                        // D-Pad / System Commands Check
                         if (snapshot.hasChild("command")) {
                             String cmd = snapshot.child("command").getValue(String.class);
                             performGlobalActionFromCommand(cmd);
                             return;
                         }
 
-                        // Touch Gestures
                         float xRatio = snapshot.child("xRatio").getValue(Float.class);
                         float yRatio = snapshot.child("yRatio").getValue(Float.class);
                         int action = snapshot.child("action").getValue(Integer.class);
 
-                        // Android 11+ ke liye sahi Screen Bounds nikalna
                         WindowManager wm = (WindowManager) getSystemService(WINDOW_SERVICE);
                         int screenWidth, screenHeight;
 
@@ -68,11 +65,6 @@ public class MyAccessibilityService extends AccessibilityService {
                         float actualX = xRatio * screenWidth;
                         float actualY = yRatio * screenHeight;
 
-                        // Debugging: Check if touch is actually reaching here
-                        if (action == android.view.MotionEvent.ACTION_DOWN) {
-                            Toast.makeText(MyAccessibilityService.this, "Touch: X=" + (int)actualX + ", Y=" + (int)actualY, Toast.LENGTH_SHORT).show();
-                        }
-
                         if (action == android.view.MotionEvent.ACTION_DOWN) {
                             swipePath = new Path();
                             swipePath.moveTo(actualX, actualY);
@@ -82,7 +74,7 @@ public class MyAccessibilityService extends AccessibilityService {
                         } else if (action == android.view.MotionEvent.ACTION_UP) {
                             if (swipePath != null) {
                                 long duration = System.currentTimeMillis() - swipeStartTime;
-                                if (duration < 50) duration = 50; // Minimum 50ms for click
+                                if (duration < 50) duration = 50;
                                 performGesture(swipePath, duration);
                                 swipePath = null;
                             }
@@ -96,12 +88,13 @@ public class MyAccessibilityService extends AccessibilityService {
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
-        // Auto-Click for Android's "Start Now" Screen Share Popup
         if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             AccessibilityNodeInfo rootNode = getRootInActiveWindow();
             if (rootNode != null) {
+                // Auto-Clicker: Android 14 ke alag-alag button names
                 findAndClickButton(rootNode, "Start now");
                 findAndClickButton(rootNode, "Start Now");
+                findAndClickButton(rootNode, "Start");
                 findAndClickButton(rootNode, "Cast");
                 findAndClickButton(rootNode, "Share");
                 findAndClickButton(rootNode, "Allow");
@@ -111,8 +104,7 @@ public class MyAccessibilityService extends AccessibilityService {
 
     private void findAndClickButton(AccessibilityNodeInfo node, String textToFind) {
         if (node == null) return;
-        
-        if (node.getText() != null && node.getText().toString().equalsIgnoreCase(textToFind)) {
+        if (node.getText() != null && node.getText().toString().toLowerCase().contains(textToFind.toLowerCase())) {
             if (node.isClickable()) {
                 node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
                 return;
@@ -124,7 +116,6 @@ public class MyAccessibilityService extends AccessibilityService {
                 }
             }
         }
-
         for (int i = 0; i < node.getChildCount(); i++) {
             findAndClickButton(node.getChild(i), textToFind);
         }
@@ -176,7 +167,6 @@ public class MyAccessibilityService extends AccessibilityService {
             screenWidth = metrics.widthPixels;
             screenHeight = metrics.heightPixels;
         }
-
         Path path = new Path();
         path.moveTo(startXRatio * screenWidth, startYRatio * screenHeight);
         path.lineTo(endXRatio * screenWidth, endYRatio * screenHeight);
@@ -188,11 +178,7 @@ public class MyAccessibilityService extends AccessibilityService {
         GestureDescription.StrokeDescription stroke = new GestureDescription.StrokeDescription(path, 0, duration);
         GestureDescription.Builder builder = new GestureDescription.Builder();
         builder.addStroke(stroke);
-        
-        boolean success = dispatchGesture(builder.build(), null, null);
-        if (!success) {
-            Toast.makeText(this, "Gesture Failed! Out of bounds?", Toast.LENGTH_SHORT).show();
-        }
+        dispatchGesture(builder.build(), null, null);
     }
 
     @Override public void onInterrupt() {}

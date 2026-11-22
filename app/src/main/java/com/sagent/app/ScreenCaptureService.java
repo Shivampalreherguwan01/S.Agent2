@@ -43,7 +43,6 @@ public class ScreenCaptureService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        // FIX: Action check hata diya, sirf data check kar rahe hain
         if (intent == null || !intent.hasExtra("roomId") || !intent.hasExtra("data")) {
             stopSelf();
             return START_NOT_STICKY;
@@ -84,7 +83,7 @@ public class ScreenCaptureService extends Service {
             startScreenCapture();
         }
         
-        return START_NOT_STICKY; 
+        return START_STICKY; 
     }
 
     private void startScreenCapture() {
@@ -107,7 +106,10 @@ public class ScreenCaptureService extends Service {
                     image = reader.acquireLatestImage();
                     if (image != null) {
                         long currentTime = System.currentTimeMillis();
-                        if (currentTime - lastFrameTime < 150 || isUploading) { // 6-7 FPS for smoothness
+                        // Agar upload atka hai 2 second se zyada, toh force reset karo
+                        if (currentTime - lastFrameTime > 2000) isUploading = false;
+
+                        if (currentTime - lastFrameTime < 150 || isUploading) { 
                             image.close(); return;
                         }
                         lastFrameTime = currentTime;
@@ -125,15 +127,21 @@ public class ScreenCaptureService extends Service {
                         bitmap.recycle();
 
                         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                        croppedBitmap.compress(Bitmap.CompressFormat.JPEG, 30, baos); 
+                        croppedBitmap.compress(Bitmap.CompressFormat.JPEG, 25, baos); 
                         String base64Image = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
 
                         Map<String, Object> frameData = new HashMap<>();
                         frameData.put("image", base64Image);
                         frameData.put("width", width);
                         frameData.put("height", height);
+                        frameData.put("timestamp", currentTime);
                         
-                        screenRef.setValue(frameData).addOnCompleteListener(task -> isUploading = false);
+                        screenRef.setValue(frameData).addOnCompleteListener(task -> {
+                            isUploading = false;
+                            if (!task.isSuccessful()) {
+                                Log.e("ScreenCapture", "Upload Failed", task.getException());
+                            }
+                        });
                         croppedBitmap.recycle();
                     }
                 } catch (Exception e) { isUploading = false; } 
