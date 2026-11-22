@@ -25,7 +25,7 @@ public class LiveControlActivity extends AppCompatActivity {
     private ImageView imageView;
     private TextView statusText;
     private DatabaseReference screenRef, touchRef, requestRef, hostActiveRef;
-    private ValueEventListener screenListener, hostListener; // Listener references
+    private ValueEventListener screenListener, hostListener;
     private boolean isFirstFrame = true;
 
     @Override
@@ -39,7 +39,7 @@ public class LiveControlActivity extends AppCompatActivity {
         imageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
         
         statusText = new TextView(this);
-        statusText.setText("Connecting...\nWaiting for Host.");
+        statusText.setText("Connecting...\nWaiting for Host Screen.");
         statusText.setTextColor(Color.CYAN);
         statusText.setTextSize(20);
         statusText.setPadding(30, 30, 30, 30);
@@ -91,18 +91,25 @@ public class LiveControlActivity extends AppCompatActivity {
         };
         screenRef.addValueEventListener(screenListener);
 
-        // PDF Point 11 fix: ACTION_DOWN, ACTION_MOVE aur ACTION_UP sab handle kiye
+        // Full Touch Support (Click, Drag, Swipe)
         imageView.setOnTouchListener((v, event) -> {
+            if (imageView.getWidth() == 0 || imageView.getHeight() == 0) return true;
+
+            float xRatio = event.getX() / imageView.getWidth();
+            float yRatio = event.getY() / imageView.getHeight();
+            
+            // Bounds check (PDF Fix)
+            xRatio = Math.max(0f, Math.min(1f, xRatio));
+            yRatio = Math.max(0f, Math.min(1f, yRatio));
+
+            Map<String, Object> touchData = new HashMap<>();
+            touchData.put("xRatio", xRatio);
+            touchData.put("yRatio", yRatio);
+            touchData.put("action", event.getAction());
+            touchData.put("timestamp", System.currentTimeMillis());
+            
+            // Sirf DOWN aur MOVE par database update karo taaki spam na ho
             if (event.getAction() == MotionEvent.ACTION_DOWN || event.getAction() == MotionEvent.ACTION_MOVE) {
-                if(imageView.getWidth() == 0 || imageView.getHeight() == 0) return true;
-                
-                float xRatio = event.getX() / imageView.getWidth();
-                float yRatio = event.getY() / imageView.getHeight();
-                Map<String, Object> touchData = new HashMap<>();
-                touchData.put("xRatio", xRatio);
-                touchData.put("yRatio", yRatio);
-                touchData.put("timestamp", System.currentTimeMillis());
-                touchData.put("action", event.getAction()); // Action bhi bhej rahe hain
                 touchRef.setValue(touchData);
             }
             return true;
@@ -111,7 +118,6 @@ public class LiveControlActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
-        // PDF Point 14 fix: Listeners clear karna zaroori hai
         if (requestRef != null) requestRef.setValue(false);
         if (hostActiveRef != null && hostListener != null) hostActiveRef.removeEventListener(hostListener);
         if (screenRef != null && screenListener != null) screenRef.removeEventListener(screenListener);

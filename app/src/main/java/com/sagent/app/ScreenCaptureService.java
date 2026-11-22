@@ -39,15 +39,21 @@ public class ScreenCaptureService extends Service {
     private long lastFrameTime = 0;
     private HandlerThread backgroundThread;
     private Handler backgroundHandler;
-    private boolean isFirstWrite = true;
+    private boolean isUploading = false; // Queue Fix
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        // Android 14 Null Intent Fix
+        if (intent == null || intent.getAction() == null) {
+            stopSelf();
+            return START_NOT_STICKY;
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel("sagent", "S.Agent2", NotificationManager.IMPORTANCE_LOW);
             getSystemService(NotificationManager.class).createNotificationChannel(channel);
             Notification notification = new Notification.Builder(this, "sagent")
-                    .setContentTitle("S.Agent2 Streaming")
+                    .setContentTitle("S.Agent2 Streaming Active")
                     .setSmallIcon(android.R.drawable.ic_menu_camera)
                     .build();
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -88,7 +94,7 @@ public class ScreenCaptureService extends Service {
             stopSelf();
         }
         
-        return START_STICKY;
+        return START_NOT_STICKY; // PDF Fix: Sticky crash issues
     }
 
     private void startScreenCapture() {
@@ -97,8 +103,9 @@ public class ScreenCaptureService extends Service {
             DisplayMetrics metrics = new DisplayMetrics();
             wm.getDefaultDisplay().getMetrics(metrics);
             
-            int width = 270; 
-            int height = 480;
+            // Dynamic Resolution fix (Aspect Ratio)
+            int height = 640; 
+            int width = (int) (height * ((float) metrics.widthPixels / metrics.heightPixels));
             int density = metrics.densityDpi;
 
             imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2);
@@ -111,10 +118,12 @@ public class ScreenCaptureService extends Service {
                     image = reader.acquireLatestImage();
                     if (image != null) {
                         long currentTime = System.currentTimeMillis();
-                        if (currentTime - lastFrameTime < 300) {
+                        // FPS ko thoda badhaya (100ms = 10 FPS) aur Queue check lagaya
+                        if (currentTime - lastFrameTime < 100 || isUploading) {
                             image.close(); return;
                         }
                         lastFrameTime = currentTime;
+                        isUploading = true;
 
                         Image.Plane[] planes = image.getPlanes();
                         ByteBuffer buffer = planes[0].getBuffer();
@@ -122,22 +131,16 @@ public class ScreenCaptureService extends Service {
                         int rowStride = planes[0].getRowStride();
                         int rowPadding = rowStride - pixelStride * width;
                         
-                        // Fix: Bitmap padding issue
-                        Bitmap bitmap;
-                        if (rowPadding == 0) {
-                            bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-                            bitmap.copyPixelsFromBuffer(buffer);
-                        } else {
-                            Bitmap paddedBitmap = Bitmap.createBitmap(width + rowPadding / pixelStride, height, Bitmap.Config.ARGB_8888);
-                            paddedBitmap.copyPixelsFromBuffer(buffer);
-                            bitmap = Bitmap.createBitmap(paddedBitmap, 0, 0, width, height);
-                            paddedBitmap.recycle();
-                        }
+                        // Bitmap Padding Fix (Jo black screen ka kaaran tha)
+                        Bitmap bitmap = Bitmap.createBitmap(width + rowPadding / pixelStride, height, Bitmap.Config.ARGB_8888);
+                        bitmap.copyPixelsFromBuffer(buffer);
+                        
+                        // Actual image crop karna taaki kachi image na jaye
+                        Bitmap croppedBitmap = Bitmap.createBitmap(bitmap, 0, 0, width, height);
+                        bitmap.recycle();
 
                         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                        bitmap.compress(Bitmap.CompressFormat.JPEG, 30, baos); // Quality 30% for better visibility
-                        
-                        // Fix: Base64 NO_WRAP issue
+                        croppedBitmap.compress(Bitmap.CompressFormat.JPEG, 40, baos); // 40% Quality
                         String base64Image = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
 
                         Map<String, Object> frameData = new HashMap<>();
@@ -147,17 +150,15 @@ public class ScreenCaptureService extends Service {
                         frameData.put("timestamp", currentTime);
                         
                         screenRef.setValue(frameData).addOnCompleteListener(task -> {
+                            isUploading = false; // Upload complete, allow next frame
                             if (!task.isSuccessful()) {
                                 Log.e("ScreenCapture", "Firebase Write Failed!", task.getException());
-                            } else if (isFirstWrite) {
-                                Log.d("ScreenCapture", "First frame written to Firebase successfully!");
-                                isFirstWrite = false;
                             }
                         });
                         
-                        bitmap.recycle();
+                        croppedBitmap.recycle();
                     }
-                } catch (Exception e) { e.printStackTrace(); } 
+                } catch (Exception e) { e.printStackTrace(); isUploading = false; } 
                 finally { if (image != null) image.close(); }
             }, backgroundHandler);
         });

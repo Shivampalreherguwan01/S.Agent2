@@ -16,6 +16,8 @@ import com.google.firebase.database.ValueEventListener;
 public class MyAccessibilityService extends AccessibilityService {
     private String roomId;
     private long lastTouchTime = 0;
+    private Path swipePath;
+    private long swipeStartTime = 0;
 
     @Override
     public void onServiceConnected() {
@@ -29,17 +31,42 @@ public class MyAccessibilityService extends AccessibilityService {
                 if (snapshot.exists()) {
                     try {
                         long timestamp = snapshot.child("timestamp").getValue(Long.class);
-                        if (timestamp > lastTouchTime) {
-                            lastTouchTime = timestamp;
-                            float xRatio = snapshot.child("xRatio").getValue(Float.class);
-                            float yRatio = snapshot.child("yRatio").getValue(Float.class);
-                            
-                            WindowManager wm = (WindowManager) getSystemService(WINDOW_SERVICE);
-                            DisplayMetrics metrics = new DisplayMetrics();
-                            wm.getDefaultDisplay().getMetrics(metrics);
-                            
-                            performClick(xRatio * metrics.widthPixels, yRatio * metrics.heightPixels);
+                        if (timestamp <= lastTouchTime) return;
+
+                        lastTouchTime = timestamp;
+                        float xRatio = snapshot.child("xRatio").getValue(Float.class);
+                        float yRatio = snapshot.child("yRatio").getValue(Float.class);
+                        int action = snapshot.child("action").getValue(Integer.class);
+
+                        WindowManager wm = (WindowManager) getSystemService(WINDOW_SERVICE);
+                        DisplayMetrics metrics = new DisplayMetrics();
+                        wm.getDefaultDisplay().getMetrics(metrics);
+                        
+                        float actualX = xRatio * metrics.widthPixels;
+                        float actualY = yRatio * metrics.heightPixels;
+
+                        if (action == android.view.MotionEvent.ACTION_DOWN) {
+                            swipePath = new Path();
+                            swipePath.moveTo(actualX, actualY);
+                            swipeStartTime = System.currentTimeMillis();
+                        } else if (action == android.view.MotionEvent.ACTION_MOVE) {
+                            if (swipePath != null) {
+                                swipePath.lineTo(actualX, actualY);
+                            }
+                        } else if (action == android.view.MotionEvent.ACTION_UP || action == android.view.MotionEvent.ACTION_CANCEL) {
+                            if (swipePath != null) {
+                                long duration = System.currentTimeMillis() - swipeStartTime;
+                                if (duration < 50) duration = 50; // Minimum click time
+                                performGesture(swipePath, duration);
+                                swipePath = null;
+                            }
                         }
+
+                        // Agar sirf click hai (Down ke baad Move nahi hua)
+                        if (action == android.view.MotionEvent.ACTION_DOWN) {
+                            performGesture(createClickPath(actualX, actualY), 50);
+                        }
+
                     } catch (Exception e) { e.printStackTrace(); }
                 }
             }
@@ -47,15 +74,20 @@ public class MyAccessibilityService extends AccessibilityService {
         });
     }
 
-    @Override public void onAccessibilityEvent(AccessibilityEvent event) {}
-    @Override public void onInterrupt() {}
+    private Path createClickPath(float x, float y) {
+        Path p = new Path();
+        p.moveTo(x, y);
+        return p;
+    }
 
-    public void performClick(float x, float y) {
-        Path path = new Path();
-        path.moveTo(x, y);
-        GestureDescription.StrokeDescription stroke = new GestureDescription.StrokeDescription(path, 0, 50);
+    private void performGesture(Path path, long duration) {
+        if (path == null) return;
+        GestureDescription.StrokeDescription stroke = new GestureDescription.StrokeDescription(path, 0, duration);
         GestureDescription.Builder builder = new GestureDescription.Builder();
         builder.addStroke(stroke);
         dispatchGesture(builder.build(), null, null);
     }
+
+    @Override public void onAccessibilityEvent(AccessibilityEvent event) {}
+    @Override public void onInterrupt() {}
 }
