@@ -39,12 +39,12 @@ public class ScreenCaptureService extends Service {
     private long lastFrameTime = 0;
     private HandlerThread backgroundThread;
     private Handler backgroundHandler;
-    private boolean isUploading = false; // Queue Fix
+    private boolean isUploading = false;
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        // Android 14 Null Intent Fix
-        if (intent == null || intent.getAction() == null) {
+        // FIX: Action check hata diya, sirf data check kar rahe hain
+        if (intent == null || !intent.hasExtra("roomId") || !intent.hasExtra("data")) {
             stopSelf();
             return START_NOT_STICKY;
         }
@@ -67,10 +67,6 @@ public class ScreenCaptureService extends Service {
         Intent data = intent.getParcelableExtra("data");
         roomId = intent.getStringExtra("roomId");
         
-        if (roomId == null || resultCode == -1 || data == null) {
-            stopSelf(); return START_NOT_STICKY;
-        }
-
         screenRef = FirebaseDatabase.getInstance().getReference("rooms").child(roomId).child("screen");
 
         backgroundThread = new HandlerThread("CaptureThread");
@@ -83,18 +79,12 @@ public class ScreenCaptureService extends Service {
         if (mediaProjection != null) {
             mediaProjection.registerCallback(new MediaProjection.Callback() {
                 @Override
-                public void onStop() {
-                    super.onStop();
-                    stopSelf();
-                }
+                public void onStop() { super.onStop(); stopSelf(); }
             }, backgroundHandler);
-
             startScreenCapture();
-        } else {
-            stopSelf();
         }
         
-        return START_NOT_STICKY; // PDF Fix: Sticky crash issues
+        return START_NOT_STICKY; 
     }
 
     private void startScreenCapture() {
@@ -103,8 +93,7 @@ public class ScreenCaptureService extends Service {
             DisplayMetrics metrics = new DisplayMetrics();
             wm.getDefaultDisplay().getMetrics(metrics);
             
-            // Dynamic Resolution fix (Aspect Ratio)
-            int height = 640; 
+            int height = 600; 
             int width = (int) (height * ((float) metrics.widthPixels / metrics.heightPixels));
             int density = metrics.densityDpi;
 
@@ -118,8 +107,7 @@ public class ScreenCaptureService extends Service {
                     image = reader.acquireLatestImage();
                     if (image != null) {
                         long currentTime = System.currentTimeMillis();
-                        // FPS ko thoda badhaya (100ms = 10 FPS) aur Queue check lagaya
-                        if (currentTime - lastFrameTime < 100 || isUploading) {
+                        if (currentTime - lastFrameTime < 150 || isUploading) { // 6-7 FPS for smoothness
                             image.close(); return;
                         }
                         lastFrameTime = currentTime;
@@ -131,34 +119,24 @@ public class ScreenCaptureService extends Service {
                         int rowStride = planes[0].getRowStride();
                         int rowPadding = rowStride - pixelStride * width;
                         
-                        // Bitmap Padding Fix (Jo black screen ka kaaran tha)
                         Bitmap bitmap = Bitmap.createBitmap(width + rowPadding / pixelStride, height, Bitmap.Config.ARGB_8888);
                         bitmap.copyPixelsFromBuffer(buffer);
-                        
-                        // Actual image crop karna taaki kachi image na jaye
                         Bitmap croppedBitmap = Bitmap.createBitmap(bitmap, 0, 0, width, height);
                         bitmap.recycle();
 
                         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                        croppedBitmap.compress(Bitmap.CompressFormat.JPEG, 40, baos); // 40% Quality
+                        croppedBitmap.compress(Bitmap.CompressFormat.JPEG, 30, baos); 
                         String base64Image = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
 
                         Map<String, Object> frameData = new HashMap<>();
                         frameData.put("image", base64Image);
                         frameData.put("width", width);
                         frameData.put("height", height);
-                        frameData.put("timestamp", currentTime);
                         
-                        screenRef.setValue(frameData).addOnCompleteListener(task -> {
-                            isUploading = false; // Upload complete, allow next frame
-                            if (!task.isSuccessful()) {
-                                Log.e("ScreenCapture", "Firebase Write Failed!", task.getException());
-                            }
-                        });
-                        
+                        screenRef.setValue(frameData).addOnCompleteListener(task -> isUploading = false);
                         croppedBitmap.recycle();
                     }
-                } catch (Exception e) { e.printStackTrace(); isUploading = false; } 
+                } catch (Exception e) { isUploading = false; } 
                 finally { if (image != null) image.close(); }
             }, backgroundHandler);
         });

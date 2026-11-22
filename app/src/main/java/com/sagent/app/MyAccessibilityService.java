@@ -32,8 +32,16 @@ public class MyAccessibilityService extends AccessibilityService {
                     try {
                         long timestamp = snapshot.child("timestamp").getValue(Long.class);
                         if (timestamp <= lastTouchTime) return;
-
                         lastTouchTime = timestamp;
+
+                        // Check for D-Pad Commands
+                        if (snapshot.hasChild("command")) {
+                            String cmd = snapshot.child("command").getValue(String.class);
+                            performGlobalActionFromCommand(cmd);
+                            return;
+                        }
+
+                        // Touch Gestures
                         float xRatio = snapshot.child("xRatio").getValue(Float.class);
                         float yRatio = snapshot.child("yRatio").getValue(Float.class);
                         int action = snapshot.child("action").getValue(Integer.class);
@@ -50,23 +58,15 @@ public class MyAccessibilityService extends AccessibilityService {
                             swipePath.moveTo(actualX, actualY);
                             swipeStartTime = System.currentTimeMillis();
                         } else if (action == android.view.MotionEvent.ACTION_MOVE) {
-                            if (swipePath != null) {
-                                swipePath.lineTo(actualX, actualY);
-                            }
-                        } else if (action == android.view.MotionEvent.ACTION_UP || action == android.view.MotionEvent.ACTION_CANCEL) {
+                            if (swipePath != null) swipePath.lineTo(actualX, actualY);
+                        } else if (action == android.view.MotionEvent.ACTION_UP) {
                             if (swipePath != null) {
                                 long duration = System.currentTimeMillis() - swipeStartTime;
-                                if (duration < 50) duration = 50; // Minimum click time
+                                if (duration < 50) duration = 50; 
                                 performGesture(swipePath, duration);
                                 swipePath = null;
                             }
                         }
-
-                        // Agar sirf click hai (Down ke baad Move nahi hua)
-                        if (action == android.view.MotionEvent.ACTION_DOWN) {
-                            performGesture(createClickPath(actualX, actualY), 50);
-                        }
-
                     } catch (Exception e) { e.printStackTrace(); }
                 }
             }
@@ -74,10 +74,28 @@ public class MyAccessibilityService extends AccessibilityService {
         });
     }
 
-    private Path createClickPath(float x, float y) {
-        Path p = new Path();
-        p.moveTo(x, y);
-        return p;
+    private void performGlobalActionFromCommand(String cmd) {
+        if (cmd == null) return;
+        switch (cmd) {
+            case "BACK": performGlobalAction(GLOBAL_ACTION_BACK); break;
+            case "HOME": performGlobalAction(GLOBAL_ACTION_HOME); break;
+            case "RECENT": performGlobalAction(GLOBAL_ACTION_RECENTS); break;
+            case "UP": performSwipe(0.5f, 0.7f, 0.5f, 0.3f); break; // Swipe Up (Scroll Down)
+            case "DOWN": performSwipe(0.5f, 0.3f, 0.5f, 0.7f); break; // Swipe Down
+            case "LEFT": performSwipe(0.7f, 0.5f, 0.3f, 0.5f); break; // Swipe Left
+            case "RIGHT": performSwipe(0.3f, 0.5f, 0.7f, 0.5f); break; // Swipe Right
+        }
+    }
+
+    private void performSwipe(float startXRatio, float startYRatio, float endXRatio, float endYRatio) {
+        WindowManager wm = (WindowManager) getSystemService(WINDOW_SERVICE);
+        DisplayMetrics metrics = new DisplayMetrics();
+        wm.getDefaultDisplay().getMetrics(metrics);
+
+        Path path = new Path();
+        path.moveTo(startXRatio * metrics.widthPixels, startYRatio * metrics.heightPixels);
+        path.lineTo(endXRatio * metrics.widthPixels, endYRatio * metrics.heightPixels);
+        performGesture(path, 200);
     }
 
     private void performGesture(Path path, long duration) {
