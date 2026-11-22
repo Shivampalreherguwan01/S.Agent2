@@ -35,6 +35,7 @@ public class HostSocketService extends Service {
     private View floatingView;
     private DatabaseReference roomRef;
     private ValueEventListener requestListener;
+    private boolean isStreaming = false; // Naya variable
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
@@ -80,8 +81,7 @@ public class HostSocketService extends Service {
                 Boolean isRequested = snapshot.getValue(Boolean.class);
                 if (isRequested != null && isRequested) {
                     // Agar pehle se screen share chal raha hai, to button mat dikhao
-                    Boolean isStreaming = snapshot.getRef().getParent().child("is_streaming").getValue(Boolean.class);
-                    if (isStreaming != null && isStreaming) {
+                    if (isStreaming) {
                         return; 
                     }
 
@@ -129,7 +129,9 @@ public class HostSocketService extends Service {
                 windowManager.removeView(floatingView);
                 floatingView = null;
             }
-            // Request false karo taaki wapas na aaye
+            
+            // Stream chal raha hai, isliye request false karo
+            isStreaming = true; 
             roomRef.child("controller_request").setValue(false);
             
             Intent autoShareIntent = new Intent(getApplicationContext(), AutoShareActivity.class);
