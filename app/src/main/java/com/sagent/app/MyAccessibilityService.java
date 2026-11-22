@@ -21,6 +21,7 @@ public class MyAccessibilityService extends AccessibilityService {
     private String roomId;
     private Path swipePath;
     private long swipeStartTime = 0;
+    private long lastTouchTime = 0;
 
     @Override
     public void onServiceConnected() {
@@ -33,20 +34,26 @@ public class MyAccessibilityService extends AccessibilityService {
             public void onDataChange(@NonNull DataSnapshot snapshot) {
                 if (snapshot.exists()) {
                     try {
+                        long timestamp = snapshot.child("timestamp").getValue(Long.class);
+                        if (timestamp <= lastTouchTime) return;
+                        lastTouchTime = timestamp;
+
+                        // D-Pad / System Commands Check
                         if (snapshot.hasChild("command")) {
                             String cmd = snapshot.child("command").getValue(String.class);
                             performGlobalActionFromCommand(cmd);
                             return;
                         }
 
+                        // Touch Gestures
                         float xRatio = snapshot.child("xRatio").getValue(Float.class);
                         float yRatio = snapshot.child("yRatio").getValue(Float.class);
                         int action = snapshot.child("action").getValue(Integer.class);
 
+                        // Android 11+ ke liye sahi Screen Bounds nikalna
                         WindowManager wm = (WindowManager) getSystemService(WINDOW_SERVICE);
                         int screenWidth, screenHeight;
 
-                        // Android 14+ ke liye naya tarika
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                             Rect bounds = wm.getCurrentWindowMetrics().getBounds();
                             screenWidth = bounds.width();
@@ -61,9 +68,9 @@ public class MyAccessibilityService extends AccessibilityService {
                         float actualX = xRatio * screenWidth;
                         float actualY = yRatio * screenHeight;
 
-                        // Debugging ke liye ki touch aa raha hai
+                        // Debugging: Check if touch is actually reaching here
                         if (action == android.view.MotionEvent.ACTION_DOWN) {
-                            Toast.makeText(MyAccessibilityService.this, "Touch: " + (int)actualX + ", " + (int)actualY, Toast.LENGTH_SHORT).show();
+                            Toast.makeText(MyAccessibilityService.this, "Touch: X=" + (int)actualX + ", Y=" + (int)actualY, Toast.LENGTH_SHORT).show();
                         }
 
                         if (action == android.view.MotionEvent.ACTION_DOWN) {
@@ -75,7 +82,7 @@ public class MyAccessibilityService extends AccessibilityService {
                         } else if (action == android.view.MotionEvent.ACTION_UP) {
                             if (swipePath != null) {
                                 long duration = System.currentTimeMillis() - swipeStartTime;
-                                if (duration < 50) duration = 50; 
+                                if (duration < 50) duration = 50; // Minimum 50ms for click
                                 performGesture(swipePath, duration);
                                 swipePath = null;
                             }
@@ -89,6 +96,7 @@ public class MyAccessibilityService extends AccessibilityService {
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
+        // Auto-Click for Android's "Start Now" Screen Share Popup
         if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             AccessibilityNodeInfo rootNode = getRootInActiveWindow();
             if (rootNode != null) {
@@ -107,13 +115,11 @@ public class MyAccessibilityService extends AccessibilityService {
         if (node.getText() != null && node.getText().toString().equalsIgnoreCase(textToFind)) {
             if (node.isClickable()) {
                 node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-                Toast.makeText(this, "Auto-Clicked: " + textToFind, Toast.LENGTH_SHORT).show();
                 return;
             } else {
                 AccessibilityNodeInfo parent = node.getParent();
                 if (parent != null && parent.isClickable()) {
                     parent.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-                    Toast.makeText(this, "Auto-Clicked Parent: " + textToFind, Toast.LENGTH_SHORT).show();
                     return;
                 }
             }
@@ -183,10 +189,9 @@ public class MyAccessibilityService extends AccessibilityService {
         GestureDescription.Builder builder = new GestureDescription.Builder();
         builder.addStroke(stroke);
         
-        // Gesture dispatch karo
         boolean success = dispatchGesture(builder.build(), null, null);
         if (!success) {
-            Toast.makeText(this, "Gesture Failed to Dispatch!", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Gesture Failed! Out of bounds?", Toast.LENGTH_SHORT).show();
         }
     }
 

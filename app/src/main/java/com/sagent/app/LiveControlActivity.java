@@ -38,9 +38,8 @@ public class LiveControlActivity extends AppCompatActivity {
     private long lastFrameReceivedTime = 0;
     private Handler reconnectHandler = new Handler(Looper.getMainLooper());
     private Runnable reconnectRunnable;
-    private boolean isConnected = false; // Naya flag
+    private boolean isConnected = false;
 
-    // Colors
     private final int bgColor = Color.parseColor("#0B0C10"); 
     private final int panelColor = Color.parseColor("#1F2833"); 
     private final int accentCyan = Color.parseColor("#45A29E"); 
@@ -54,7 +53,6 @@ public class LiveControlActivity extends AppCompatActivity {
         RelativeLayout rootLayout = new RelativeLayout(this);
         rootLayout.setBackgroundColor(bgColor);
 
-        // TOP BAR
         RelativeLayout topBar = new RelativeLayout(this);
         topBar.setId(View.generateViewId());
         topBar.setBackgroundColor(panelColor);
@@ -90,7 +88,6 @@ public class LiveControlActivity extends AppCompatActivity {
         topParams.addRule(RelativeLayout.ALIGN_PARENT_TOP);
         rootLayout.addView(topBar, topParams);
 
-        // MAIN SCREEN
         imageView = new ImageView(this);
         imageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
         RelativeLayout.LayoutParams imgParams = new RelativeLayout.LayoutParams(
@@ -109,7 +106,6 @@ public class LiveControlActivity extends AppCompatActivity {
         statusParams.addRule(RelativeLayout.CENTER_IN_PARENT);
         rootLayout.addView(statusText, statusParams);
 
-        // BOTTOM PANEL
         LinearLayout bottomPanel = new LinearLayout(this);
         bottomPanel.setOrientation(LinearLayout.HORIZONTAL);
         bottomPanel.setGravity(Gravity.CENTER_VERTICAL);
@@ -186,7 +182,6 @@ public class LiveControlActivity extends AppCompatActivity {
 
         setContentView(rootLayout);
 
-        // FIREBASE
         DatabaseReference roomRef = FirebaseDatabase.getInstance().getReference("rooms").child(roomId);
         screenRef = roomRef.child("screen");
         touchRef = roomRef.child("touch");
@@ -208,7 +203,7 @@ public class LiveControlActivity extends AppCompatActivity {
                 } else {
                     tvHostName.setText("Device: Connected");
                     tvHostName.setTextColor(Color.WHITE);
-                    if(!isConnected) requestRef.setValue(true); // Sirf tab bhejo jab connected na ho
+                    if(!isConnected) requestRef.setValue(true);
                 }
             }
             @Override public void onCancelled(@NonNull DatabaseError error) {}
@@ -226,7 +221,7 @@ public class LiveControlActivity extends AppCompatActivity {
                             Bitmap decodedByte = BitmapFactory.decodeByteArray(decodedString, 0, decodedString.length);
                             if (decodedByte != null) {
                                 lastFrameReceivedTime = System.currentTimeMillis();
-                                isConnected = true; // Screen mil gayi, ab request mat bhejo
+                                isConnected = true; 
                                 runOnUiThread(() -> {
                                     imageView.setImageBitmap(decodedByte);
                                     if(isFirstFrame) { 
@@ -243,7 +238,6 @@ public class LiveControlActivity extends AppCompatActivity {
         };
         screenRef.addValueEventListener(screenListener);
 
-        // Reconnect Logic: Sirf tab request bhejo jab screen na mil rahi ho
         reconnectRunnable = new Runnable() {
             @Override
             public void run() {
@@ -255,6 +249,7 @@ public class LiveControlActivity extends AppCompatActivity {
         };
         reconnectHandler.post(reconnectRunnable);
 
+        // SABSE IMPORTANT: FIT_CENTER Touch Calculation
         imageView.setOnTouchListener((v, event) -> {
             if (imageView.getDrawable() == null) return true;
 
@@ -263,6 +258,7 @@ public class LiveControlActivity extends AppCompatActivity {
             float viewWidth = imageView.getWidth();
             float viewHeight = imageView.getHeight();
 
+            // Image ka actual display area (letterbox hatakar) nikalna
             float scale = Math.min(viewWidth / drawableWidth, viewHeight / drawableHeight);
             float displayWidth = drawableWidth * scale;
             float displayHeight = drawableHeight * scale;
@@ -273,6 +269,7 @@ public class LiveControlActivity extends AppCompatActivity {
             float xRatio = (event.getX() - deltaX) / displayWidth;
             float yRatio = (event.getY() - deltaY) / displayHeight;
 
+            // Agar touch image ke bahar (kali patti par) hai to ignore karo
             if (xRatio < 0 || xRatio > 1 || yRatio < 0 || yRatio > 1) return true;
 
             Map<String, Object> touchData = new HashMap<>();
