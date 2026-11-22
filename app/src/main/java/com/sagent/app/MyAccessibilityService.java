@@ -34,14 +34,14 @@ public class MyAccessibilityService extends AccessibilityService {
                         if (timestamp <= lastTouchTime) return;
                         lastTouchTime = timestamp;
 
-                        // Check for D-Pad Commands
+                        // Check for D-Pad / Nav Commands
                         if (snapshot.hasChild("command")) {
                             String cmd = snapshot.child("command").getValue(String.class);
                             performGlobalActionFromCommand(cmd);
                             return;
                         }
 
-                        // Touch Gestures
+                        // Touch Gestures (Swipe / Click)
                         float xRatio = snapshot.child("xRatio").getValue(Float.class);
                         float yRatio = snapshot.child("yRatio").getValue(Float.class);
                         int action = snapshot.child("action").getValue(Integer.class);
@@ -80,11 +80,22 @@ public class MyAccessibilityService extends AccessibilityService {
             case "BACK": performGlobalAction(GLOBAL_ACTION_BACK); break;
             case "HOME": performGlobalAction(GLOBAL_ACTION_HOME); break;
             case "RECENT": performGlobalAction(GLOBAL_ACTION_RECENTS); break;
-            case "UP": performSwipe(0.5f, 0.7f, 0.5f, 0.3f); break; // Swipe Up (Scroll Down)
-            case "DOWN": performSwipe(0.5f, 0.3f, 0.5f, 0.7f); break; // Swipe Down
-            case "LEFT": performSwipe(0.7f, 0.5f, 0.3f, 0.5f); break; // Swipe Left
-            case "RIGHT": performSwipe(0.3f, 0.5f, 0.7f, 0.5f); break; // Swipe Right
+            case "POWER": performGlobalAction(GLOBAL_ACTION_POWER_DIALOG); break;
+            case "ENTER": performTapCenter(); break;
+            case "UP": performSwipe(0.5f, 0.7f, 0.5f, 0.3f); break; 
+            case "DOWN": performSwipe(0.5f, 0.3f, 0.5f, 0.7f); break; 
+            case "LEFT": performSwipe(0.7f, 0.5f, 0.3f, 0.5f); break; 
+            case "RIGHT": performSwipe(0.3f, 0.5f, 0.7f, 0.5f); break; 
         }
+    }
+    
+    private void performTapCenter() {
+        WindowManager wm = (WindowManager) getSystemService(WINDOW_SERVICE);
+        DisplayMetrics metrics = new DisplayMetrics();
+        wm.getDefaultDisplay().getMetrics(metrics);
+        Path path = new Path();
+        path.moveTo(metrics.widthPixels / 2f, metrics.heightPixels / 2f);
+        performGesture(path, 50);
     }
 
     private void performSwipe(float startXRatio, float startYRatio, float endXRatio, float endYRatio) {
