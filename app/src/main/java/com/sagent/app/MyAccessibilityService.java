@@ -3,6 +3,8 @@ package com.sagent.app;
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
 import android.graphics.Path;
+import android.graphics.Rect;
+import android.os.Build;
 import android.util.DisplayMetrics;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
@@ -14,11 +16,9 @@ import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
 import com.google.firebase.database.ValueEventListener;
-import java.util.List;
 
 public class MyAccessibilityService extends AccessibilityService {
     private String roomId;
-    private long lastTouchTime = 0;
     private Path swipePath;
     private long swipeStartTime = 0;
 
@@ -33,10 +33,6 @@ public class MyAccessibilityService extends AccessibilityService {
             public void onDataChange(@NonNull DataSnapshot snapshot) {
                 if (snapshot.exists()) {
                     try {
-                        long timestamp = snapshot.child("timestamp").getValue(Long.class);
-                        if (timestamp <= lastTouchTime) return;
-                        lastTouchTime = timestamp;
-
                         if (snapshot.hasChild("command")) {
                             String cmd = snapshot.child("command").getValue(String.class);
                             performGlobalActionFromCommand(cmd);
@@ -48,11 +44,27 @@ public class MyAccessibilityService extends AccessibilityService {
                         int action = snapshot.child("action").getValue(Integer.class);
 
                         WindowManager wm = (WindowManager) getSystemService(WINDOW_SERVICE);
-                        DisplayMetrics metrics = new DisplayMetrics();
-                        wm.getDefaultDisplay().getMetrics(metrics);
+                        int screenWidth, screenHeight;
+
+                        // Android 14+ ke liye naya tarika
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            Rect bounds = wm.getCurrentWindowMetrics().getBounds();
+                            screenWidth = bounds.width();
+                            screenHeight = bounds.height();
+                        } else {
+                            DisplayMetrics metrics = new DisplayMetrics();
+                            wm.getDefaultDisplay().getRealMetrics(metrics);
+                            screenWidth = metrics.widthPixels;
+                            screenHeight = metrics.heightPixels;
+                        }
                         
-                        float actualX = xRatio * metrics.widthPixels;
-                        float actualY = yRatio * metrics.heightPixels;
+                        float actualX = xRatio * screenWidth;
+                        float actualY = yRatio * screenHeight;
+
+                        // Debugging ke liye ki touch aa raha hai
+                        if (action == android.view.MotionEvent.ACTION_DOWN) {
+                            Toast.makeText(MyAccessibilityService.this, "Touch: " + (int)actualX + ", " + (int)actualY, Toast.LENGTH_SHORT).show();
+                        }
 
                         if (action == android.view.MotionEvent.ACTION_DOWN) {
                             swipePath = new Path();
@@ -75,13 +87,11 @@ public class MyAccessibilityService extends AccessibilityService {
         });
     }
 
-    // --- यहाँ से ऑटो-क्लिकर का जादू शुरू होता है ---
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             AccessibilityNodeInfo rootNode = getRootInActiveWindow();
             if (rootNode != null) {
-                // Android ke "Start Now" ya "Cast" button ko dhoondhna
                 findAndClickButton(rootNode, "Start now");
                 findAndClickButton(rootNode, "Start Now");
                 findAndClickButton(rootNode, "Cast");
@@ -100,7 +110,6 @@ public class MyAccessibilityService extends AccessibilityService {
                 Toast.makeText(this, "Auto-Clicked: " + textToFind, Toast.LENGTH_SHORT).show();
                 return;
             } else {
-                // Agar button ke andar ka text clickable nahi hai, to parent par click karo
                 AccessibilityNodeInfo parent = node.getParent();
                 if (parent != null && parent.isClickable()) {
                     parent.performAction(AccessibilityNodeInfo.ACTION_CLICK);
@@ -114,7 +123,6 @@ public class MyAccessibilityService extends AccessibilityService {
             findAndClickButton(node.getChild(i), textToFind);
         }
     }
-    // --- ऑटो-क्लिकर खत्म ---
 
     private void performGlobalActionFromCommand(String cmd) {
         if (cmd == null) return;
@@ -133,21 +141,39 @@ public class MyAccessibilityService extends AccessibilityService {
     
     private void performTapCenter() {
         WindowManager wm = (WindowManager) getSystemService(WINDOW_SERVICE);
-        DisplayMetrics metrics = new DisplayMetrics();
-        wm.getDefaultDisplay().getMetrics(metrics);
+        int screenWidth, screenHeight;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Rect bounds = wm.getCurrentWindowMetrics().getBounds();
+            screenWidth = bounds.width();
+            screenHeight = bounds.height();
+        } else {
+            DisplayMetrics metrics = new DisplayMetrics();
+            wm.getDefaultDisplay().getRealMetrics(metrics);
+            screenWidth = metrics.widthPixels;
+            screenHeight = metrics.heightPixels;
+        }
         Path path = new Path();
-        path.moveTo(metrics.widthPixels / 2f, metrics.heightPixels / 2f);
+        path.moveTo(screenWidth / 2f, screenHeight / 2f);
         performGesture(path, 50);
     }
 
     private void performSwipe(float startXRatio, float startYRatio, float endXRatio, float endYRatio) {
         WindowManager wm = (WindowManager) getSystemService(WINDOW_SERVICE);
-        DisplayMetrics metrics = new DisplayMetrics();
-        wm.getDefaultDisplay().getMetrics(metrics);
+        int screenWidth, screenHeight;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Rect bounds = wm.getCurrentWindowMetrics().getBounds();
+            screenWidth = bounds.width();
+            screenHeight = bounds.height();
+        } else {
+            DisplayMetrics metrics = new DisplayMetrics();
+            wm.getDefaultDisplay().getRealMetrics(metrics);
+            screenWidth = metrics.widthPixels;
+            screenHeight = metrics.heightPixels;
+        }
 
         Path path = new Path();
-        path.moveTo(startXRatio * metrics.widthPixels, startYRatio * metrics.heightPixels);
-        path.lineTo(endXRatio * metrics.widthPixels, endYRatio * metrics.heightPixels);
+        path.moveTo(startXRatio * screenWidth, startYRatio * screenHeight);
+        path.lineTo(endXRatio * screenWidth, endYRatio * screenHeight);
         performGesture(path, 200);
     }
 
@@ -156,7 +182,12 @@ public class MyAccessibilityService extends AccessibilityService {
         GestureDescription.StrokeDescription stroke = new GestureDescription.StrokeDescription(path, 0, duration);
         GestureDescription.Builder builder = new GestureDescription.Builder();
         builder.addStroke(stroke);
-        dispatchGesture(builder.build(), null, null);
+        
+        // Gesture dispatch karo
+        boolean success = dispatchGesture(builder.build(), null, null);
+        if (!success) {
+            Toast.makeText(this, "Gesture Failed to Dispatch!", Toast.LENGTH_SHORT).show();
+        }
     }
 
     @Override public void onInterrupt() {}
