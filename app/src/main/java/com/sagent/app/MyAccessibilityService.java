@@ -6,12 +6,15 @@ import android.graphics.Path;
 import android.util.DisplayMetrics;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
+import android.view.accessibility.AccessibilityNodeInfo;
+import android.widget.Toast;
 import androidx.annotation.NonNull;
 import com.google.firebase.database.DataSnapshot;
 import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
 import com.google.firebase.database.ValueEventListener;
+import java.util.List;
 
 public class MyAccessibilityService extends AccessibilityService {
     private String roomId;
@@ -34,14 +37,12 @@ public class MyAccessibilityService extends AccessibilityService {
                         if (timestamp <= lastTouchTime) return;
                         lastTouchTime = timestamp;
 
-                        // Check for D-Pad / Nav Commands
                         if (snapshot.hasChild("command")) {
                             String cmd = snapshot.child("command").getValue(String.class);
                             performGlobalActionFromCommand(cmd);
                             return;
                         }
 
-                        // Touch Gestures (Swipe / Click)
                         float xRatio = snapshot.child("xRatio").getValue(Float.class);
                         float yRatio = snapshot.child("yRatio").getValue(Float.class);
                         int action = snapshot.child("action").getValue(Integer.class);
@@ -73,6 +74,47 @@ public class MyAccessibilityService extends AccessibilityService {
             @Override public void onCancelled(@NonNull DatabaseError error) {}
         });
     }
+
+    // --- यहाँ से ऑटो-क्लिकर का जादू शुरू होता है ---
+    @Override
+    public void onAccessibilityEvent(AccessibilityEvent event) {
+        if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            AccessibilityNodeInfo rootNode = getRootInActiveWindow();
+            if (rootNode != null) {
+                // Android ke "Start Now" ya "Cast" button ko dhoondhna
+                findAndClickButton(rootNode, "Start now");
+                findAndClickButton(rootNode, "Start Now");
+                findAndClickButton(rootNode, "Cast");
+                findAndClickButton(rootNode, "Share");
+                findAndClickButton(rootNode, "Allow");
+            }
+        }
+    }
+
+    private void findAndClickButton(AccessibilityNodeInfo node, String textToFind) {
+        if (node == null) return;
+        
+        if (node.getText() != null && node.getText().toString().equalsIgnoreCase(textToFind)) {
+            if (node.isClickable()) {
+                node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                Toast.makeText(this, "Auto-Clicked: " + textToFind, Toast.LENGTH_SHORT).show();
+                return;
+            } else {
+                // Agar button ke andar ka text clickable nahi hai, to parent par click karo
+                AccessibilityNodeInfo parent = node.getParent();
+                if (parent != null && parent.isClickable()) {
+                    parent.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                    Toast.makeText(this, "Auto-Clicked Parent: " + textToFind, Toast.LENGTH_SHORT).show();
+                    return;
+                }
+            }
+        }
+
+        for (int i = 0; i < node.getChildCount(); i++) {
+            findAndClickButton(node.getChild(i), textToFind);
+        }
+    }
+    // --- ऑटो-क्लिकर खत्म ---
 
     private void performGlobalActionFromCommand(String cmd) {
         if (cmd == null) return;
@@ -117,6 +159,5 @@ public class MyAccessibilityService extends AccessibilityService {
         dispatchGesture(builder.build(), null, null);
     }
 
-    @Override public void onAccessibilityEvent(AccessibilityEvent event) {}
     @Override public void onInterrupt() {}
 }
