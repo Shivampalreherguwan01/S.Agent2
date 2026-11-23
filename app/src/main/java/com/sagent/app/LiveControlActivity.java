@@ -27,6 +27,8 @@ import com.google.firebase.database.FirebaseDatabase;
 import com.google.firebase.database.ValueEventListener;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class LiveControlActivity extends AppCompatActivity {
     private String roomId;
@@ -38,6 +40,7 @@ public class LiveControlActivity extends AppCompatActivity {
     private long lastFrameReceivedTime = 0;
     private Handler reconnectHandler = new Handler(Looper.getMainLooper());
     private Runnable reconnectRunnable;
+    private ExecutorService decodeExecutor = Executors.newSingleThreadExecutor(); // Background thread
 
     private final int bgColor = Color.parseColor("#0B0C10"); 
     private final int panelColor = Color.parseColor("#1F2833"); 
@@ -52,7 +55,6 @@ public class LiveControlActivity extends AppCompatActivity {
         RelativeLayout rootLayout = new RelativeLayout(this);
         rootLayout.setBackgroundColor(bgColor);
 
-        // TOP BAR
         RelativeLayout topBar = new RelativeLayout(this);
         topBar.setId(View.generateViewId());
         topBar.setBackgroundColor(panelColor);
@@ -88,7 +90,6 @@ public class LiveControlActivity extends AppCompatActivity {
         topParams.addRule(RelativeLayout.ALIGN_PARENT_TOP);
         rootLayout.addView(topBar, topParams);
 
-        // MAIN SCREEN
         imageView = new ImageView(this);
         imageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
         RelativeLayout.LayoutParams imgParams = new RelativeLayout.LayoutParams(
@@ -184,7 +185,6 @@ public class LiveControlActivity extends AppCompatActivity {
 
         setContentView(rootLayout);
 
-        // FIREBASE LOGIC
         DatabaseReference roomRef = FirebaseDatabase.getInstance().getReference("rooms").child(roomId);
         screenRef = roomRef.child("screen");
         touchRef = roomRef.child("touch");
@@ -201,11 +201,12 @@ public class LiveControlActivity extends AppCompatActivity {
                         tvHostName.setTextColor(Color.RED);
                         statusText.setVisibility(View.VISIBLE);
                         statusText.setText("Host is Offline.\nCheck Host Phone.");
+                        imageView.setImageBitmap(null);
                     });
                 } else {
                     tvHostName.setText("Device: Connected");
                     tvHostName.setTextColor(Color.WHITE);
-                    requestRef.setValue(true); // Request bhejte raho
+                    requestRef.setValue(true); 
                 }
             }
             @Override public void onCancelled(@NonNull DatabaseError error) {}
@@ -219,18 +220,21 @@ public class LiveControlActivity extends AppCompatActivity {
                     try {
                         String base64 = snapshot.child("image").getValue(String.class);
                         if (base64 != null) {
-                            byte[] decodedString = Base64.decode(base64, Base64.NO_WRAP);
-                            Bitmap decodedByte = BitmapFactory.decodeByteArray(decodedString, 0, decodedString.length);
-                            if (decodedByte != null) {
-                                lastFrameReceivedTime = System.currentTimeMillis();
-                                runOnUiThread(() -> {
-                                    imageView.setImageBitmap(decodedByte);
-                                    if(isFirstFrame) { 
-                                        statusText.setVisibility(View.GONE); 
-                                        isFirstFrame = false; 
-                                    }
-                                });
-                            }
+                            // PDF FIX: Background Thread me decode karo
+                            decodeExecutor.execute(() -> {
+                                byte[] decodedString = Base64.decode(base64, Base64.NO_WRAP);
+                                Bitmap decodedByte = BitmapFactory.decodeByteArray(decodedString, 0, decodedString.length);
+                                if (decodedByte != null) {
+                                    lastFrameReceivedTime = System.currentTimeMillis();
+                                    runOnUiThread(() -> {
+                                        imageView.setImageBitmap(decodedByte);
+                                        if(isFirstFrame) { 
+                                            statusText.setVisibility(View.GONE); 
+                                            isFirstFrame = false; 
+                                        }
+                                    });
+                                }
+                            });
                         }
                     } catch (Exception e) { Log.e("Controller", "Decode Error", e); }
                 }
@@ -239,24 +243,23 @@ public class LiveControlActivity extends AppCompatActivity {
         };
         screenRef.addValueEventListener(screenListener);
 
-        // TIMEOUT LOGIC: Agar 5 second tak screen nahi aayi, to dobara request bhejo
+        // PDF FIX: Timeout (Agar 4 second tak frame na aaye, screen clear kar do)
         reconnectRunnable = new Runnable() {
             @Override
             public void run() {
-                if (System.currentTimeMillis() - lastFrameReceivedTime > 5000) {
-                    requestRef.setValue(true); 
-                    // Screen gayab kardo taaki user ko pata chale ki reconnect ho raha hai
+                if (System.currentTimeMillis() - lastFrameReceivedTime > 4000) {
                     runOnUiThread(() -> {
+                        imageView.setImageBitmap(null); // Puraani screen hatao
                         statusText.setVisibility(View.VISIBLE);
-                        statusText.setText("Reconnecting...\nScreen was frozen.");
+                        statusText.setText("Reconnecting...\nWaiting for Host.");
                     });
+                    requestRef.setValue(true); 
                 }
-                reconnectHandler.postDelayed(this, 5000);
+                reconnectHandler.postDelayed(this, 3000);
             }
         };
         reconnectHandler.post(reconnectRunnable);
 
-        // TOUCH LOGIC (FIT_CENTER)
         imageView.setOnTouchListener((v, event) -> {
             if (imageView.getDrawable() == null) return true;
 
@@ -330,6 +333,7 @@ public class LiveControlActivity extends AppCompatActivity {
         if (hostActiveRef != null && hostListener != null) hostActiveRef.removeEventListener(hostListener);
         if (screenRef != null && screenListener != null) screenRef.removeEventListener(screenListener);
         if (reconnectHandler != null && reconnectRunnable != null) reconnectHandler.removeCallbacks(reconnectRunnable);
+        decodeExecutor.shutdown();
         super.onDestroy();
     }
 }

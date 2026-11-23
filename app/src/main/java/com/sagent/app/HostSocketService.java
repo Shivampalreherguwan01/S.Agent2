@@ -55,6 +55,8 @@ public class HostSocketService extends Service {
         windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
         roomRef = FirebaseDatabase.getInstance().getReference("rooms").child(roomId);
 
+        // PDF FIX: Agar host ka internet gaya, to status false ho jaye
+        roomRef.child("host_active").onDisconnect().setValue(false);
         roomRef.child("host_active").setValue(true);
         roomRef.child("controller_request").setValue(false);
 
@@ -81,8 +83,6 @@ public class HostSocketService extends Service {
                 if (isRequested != null && isRequested) {
                     if (Settings.canDrawOverlays(HostSocketService.this)) {
                         showFloatingButton();
-                    } else {
-                        new Handler(Looper.getMainLooper()).post(() -> Toast.makeText(getApplicationContext(), "Overlay Permission Missing!", Toast.LENGTH_LONG).show());
                     }
                 }
             }
@@ -111,7 +111,8 @@ public class HostSocketService extends Service {
         params.y = 100;
 
         Button acceptBtn = new Button(this);
-        acceptBtn.setText("CONTROLLER CONNECTED!\nTap to Share Screen");
+        // Yahan humne unique text dala hai
+        acceptBtn.setText("[SAgent] CONTROLLER CONNECTED!");
         acceptBtn.setBackgroundColor(Color.parseColor("#00E676"));
         acceptBtn.setTextColor(Color.BLACK);
         acceptBtn.setPadding(30, 30, 30, 30);

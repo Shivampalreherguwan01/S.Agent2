@@ -9,7 +9,6 @@ import android.util.DisplayMetrics;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
-import android.widget.Toast;
 import androidx.annotation.NonNull;
 import com.google.firebase.database.DataSnapshot;
 import com.google.firebase.database.DatabaseError;
@@ -25,9 +24,11 @@ public class MyAccessibilityService extends AccessibilityService {
     private long swipeStartTime = 0;
     private long lastTouchTime = 0;
 
-    // Sirf aur sirf screen share wale button ke exact words
+    // Sirf inhi exact words par click karna hai
     private final List<String> allowKeywords = Arrays.asList(
-            "start now", "start now", "अभी शुरू करें"
+            "[sagent] controller connected!", 
+            "start now", 
+            "अभी शुरू करें"
     );
 
     @Override
@@ -95,29 +96,24 @@ public class MyAccessibilityService extends AccessibilityService {
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
-        // Sirf tab click karega jab screen par koi naya popup aaye
-        if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+        if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || 
+            event.getEventType() == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+            
             AccessibilityNodeInfo rootNode = getRootInActiveWindow();
             if (rootNode != null) {
-                // Check karo ki kya yeh System ka popup hai
-                if (rootNode.getPackageName() != null) {
-                    String pkg = rootNode.getPackageName().toString();
-                    // Sirf system UI ya settings mein click karo, apps (jaise facebook) mein nahi
-                    if (pkg.contains("android") || pkg.contains("settings") || pkg.contains("systemui")) {
-                        searchAndClick(rootNode, 0);
-                    }
-                }
+                searchAndClick(rootNode, 0);
             }
         }
     }
 
     private void searchAndClick(AccessibilityNodeInfo node, int depth) {
-        if (node == null || depth > 10) return; // Infinite loop se bachne ke liye
+        if (node == null || depth > 15) return;
 
         if (node.getText() != null) {
             String text = node.getText().toString().toLowerCase().trim();
             for (String keyword : allowKeywords) {
-                if (text.equals(keyword)) {
+                // Exact match (Poora shabd match ho)
+                if (text.equals(keyword) || text.contains(keyword)) {
                     if (clickNodeOrParent(node)) return;
                 }
             }
@@ -130,15 +126,13 @@ public class MyAccessibilityService extends AccessibilityService {
 
     private boolean clickNodeOrParent(AccessibilityNodeInfo node) {
         if (node.isClickable()) {
-            node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-            return true;
+            if(node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true;
         }
         AccessibilityNodeInfo parent = node.getParent();
         int depth = 0;
-        while (parent != null && depth < 4) { 
+        while (parent != null && depth < 3) { 
             if (parent.isClickable()) {
-                parent.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-                return true;
+                if(parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true;
             }
             parent = parent.getParent();
             depth++;

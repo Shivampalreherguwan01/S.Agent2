@@ -83,7 +83,7 @@ public class ScreenCaptureService extends Service {
             startScreenCapture();
         }
         
-        return START_STICKY; 
+        return START_NOT_STICKY; // PDF FIX
     }
 
     private void startScreenCapture() {
@@ -106,8 +106,7 @@ public class ScreenCaptureService extends Service {
                     image = reader.acquireLatestImage();
                     if (image != null) {
                         long currentTime = System.currentTimeMillis();
-                        // Agar upload atka hai 2 second se zyada, toh force reset karo
-                        if (currentTime - lastFrameTime > 2000) isUploading = false;
+                        if (currentTime - lastFrameTime > 2000) isUploading = false; // Timeout
 
                         if (currentTime - lastFrameTime < 150 || isUploading) { 
                             image.close(); return;
@@ -144,7 +143,10 @@ public class ScreenCaptureService extends Service {
                         });
                         croppedBitmap.recycle();
                     }
-                } catch (Exception e) { isUploading = false; } 
+                } catch (Exception e) { 
+                    isUploading = false; 
+                    Log.e("ScreenCapture", "Error", e);
+                } 
                 finally { if (image != null) image.close(); }
             }, backgroundHandler);
         });
