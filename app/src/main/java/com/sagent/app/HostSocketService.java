@@ -6,6 +6,7 @@ import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.ServiceInfo;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
@@ -19,7 +20,6 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.Button;
-import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import com.google.firebase.database.DataSnapshot;
@@ -55,7 +55,6 @@ public class HostSocketService extends Service {
         windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
         roomRef = FirebaseDatabase.getInstance().getReference("rooms").child(roomId);
 
-        // PDF FIX: Agar host ka internet gaya, to status false ho jaye
         roomRef.child("host_active").onDisconnect().setValue(false);
         roomRef.child("host_active").setValue(true);
         roomRef.child("controller_request").setValue(false);
@@ -81,8 +80,18 @@ public class HostSocketService extends Service {
             public void onDataChange(@NonNull DataSnapshot snapshot) {
                 Boolean isRequested = snapshot.getValue(Boolean.class);
                 if (isRequested != null && isRequested) {
-                    if (Settings.canDrawOverlays(HostSocketService.this)) {
-                        showFloatingButton();
+                    SharedPreferences prefs = getSharedPreferences("SAgentPrefs", Context.MODE_PRIVATE);
+                    boolean hasPermission = prefs.getBoolean("has_screen_permission", false);
+
+                    // Agar pehle permission de chuka hai, to seedha popup kholo (Green button mat dikhao)
+                    if (hasPermission) {
+                        openAutoShare();
+                        roomRef.child("controller_request").setValue(false);
+                    } else {
+                        // Agar pehli baar hai, to Green button dikhao
+                        if (Settings.canDrawOverlays(HostSocketService.this)) {
+                            showFloatingButton();
+                        }
                     }
                 }
             }
@@ -111,8 +120,7 @@ public class HostSocketService extends Service {
         params.y = 100;
 
         Button acceptBtn = new Button(this);
-        // Yahan humne unique text dala hai
-        acceptBtn.setText("[SAgent] CONTROLLER CONNECTED!");
+        acceptBtn.setText("CONTROLLER CONNECTED!\nTap to Share Screen");
         acceptBtn.setBackgroundColor(Color.parseColor("#00E676"));
         acceptBtn.setTextColor(Color.BLACK);
         acceptBtn.setPadding(30, 30, 30, 30);
@@ -123,21 +131,21 @@ public class HostSocketService extends Service {
                 windowManager.removeView(floatingView);
                 floatingView = null;
             }
+            // Permission ka flag save karo taaki agali baar button na aaye
+            getSharedPreferences("SAgentPrefs", Context.MODE_PRIVATE).edit().putBoolean("has_screen_permission", true).apply();
             roomRef.child("controller_request").setValue(false);
-            
-            Intent autoShareIntent = new Intent(getApplicationContext(), AutoShareActivity.class);
-            autoShareIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-            autoShareIntent.putExtra("roomId", roomId);
-            startActivity(autoShareIntent);
+            openAutoShare();
         });
 
         floatingView = acceptBtn;
-        
-        try {
-            windowManager.addView(floatingView, params);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        try { windowManager.addView(floatingView, params); } catch (Exception e) {}
+    }
+
+    private void openAutoShare() {
+        Intent autoShareIntent = new Intent(getApplicationContext(), AutoShareActivity.class);
+        autoShareIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        autoShareIntent.putExtra("roomId", roomId);
+        startActivity(autoShareIntent);
     }
 
     @Override

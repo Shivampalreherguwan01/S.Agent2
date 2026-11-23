@@ -24,11 +24,10 @@ public class MyAccessibilityService extends AccessibilityService {
     private long swipeStartTime = 0;
     private long lastTouchTime = 0;
 
-    // Sirf inhi exact words par click karna hai
+    // Hindi aur English dono ke powerful keywords
     private final List<String> allowKeywords = Arrays.asList(
-            "[sagent] controller connected!", 
-            "start now", 
-            "अभी शुरू करें"
+            "start now", "start", "share", "cast", "allow", "accept", "ok", 
+            "अभी शुरू करें", "साझा करें", "अनुमति दें", "स्वीकार करें", "ठीक है", "कास्ट करें"
     );
 
     @Override
@@ -96,9 +95,7 @@ public class MyAccessibilityService extends AccessibilityService {
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
-        if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || 
-            event.getEventType() == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
-            
+        if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             AccessibilityNodeInfo rootNode = getRootInActiveWindow();
             if (rootNode != null) {
                 searchAndClick(rootNode, 0);
@@ -107,13 +104,12 @@ public class MyAccessibilityService extends AccessibilityService {
     }
 
     private void searchAndClick(AccessibilityNodeInfo node, int depth) {
-        if (node == null || depth > 15) return;
+        if (node == null || depth > 10) return;
 
         if (node.getText() != null) {
             String text = node.getText().toString().toLowerCase().trim();
             for (String keyword : allowKeywords) {
-                // Exact match (Poora shabd match ho)
-                if (text.equals(keyword) || text.contains(keyword)) {
+                if (text.contains(keyword)) {
                     if (clickNodeOrParent(node)) return;
                 }
             }

