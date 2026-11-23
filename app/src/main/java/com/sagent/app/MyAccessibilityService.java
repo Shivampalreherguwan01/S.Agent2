@@ -26,21 +26,22 @@ public class MyAccessibilityService extends AccessibilityService {
     private long lastTouchTime = 0;
     private long lastClickTime = 0;
 
-    // Sirf yahi words click honge (Share, Start, Allow hata diya hai)
     private final List<String> allowKeywords = Arrays.asList(
             "[sagent] controller connected!",
             "start now",
-            "अभी शुरू करें"
+            "start now",
+            "अभी शुरू करें",
+            "cast",
+            "साझा करें"
     );
 
-    // Sirf inhi apps me click karega (Facebook/Chrome block ho gaye)
-    private boolean isAllowedPackage(String packageName) {
-        if (packageName == null) return false;
-        return packageName.equals("com.sagent.app") ||
-               packageName.contains("systemui") ||
-               packageName.equals("android") ||
-               packageName.contains("permissioncontroller") ||
-               packageName.contains("settings");
+    // BLACKLIST: In apps me kabhi click nahi karega
+    private boolean isBlockedPackage(String pkg) {
+        if (pkg == null) return true;
+        return pkg.contains("facebook") || pkg.contains("instagram") || 
+               pkg.contains("whatsapp") || pkg.contains("chrome") ||
+               pkg.contains("youtube") || pkg.contains("twitter") ||
+               pkg.contains("snapchat") || pkg.contains("telegram");
     }
 
     @Override
@@ -110,21 +111,20 @@ public class MyAccessibilityService extends AccessibilityService {
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event.getPackageName() == null) return;
         
-        // Agar package allowed nahi hai (jaise Facebook hai), to wapas jao
         String pkg = event.getPackageName().toString();
-        if (!isAllowedPackage(pkg)) return;
+        // Agar blocked app hai (Facebook etc) to wapas jao
+        if (isBlockedPackage(pkg)) return;
 
         if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || 
             event.getEventType() == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
             
-            // Spam click rokne ke liye (Har 1.5 second me sirf ek bar)
             long currentTime = System.currentTimeMillis();
-            if (currentTime - lastClickTime < 1500) return;
+            if (currentTime - lastClickTime < 1500) return; // 1.5 second delay
 
             AccessibilityNodeInfo rootNode = getRootInActiveWindow();
             if (rootNode != null) {
                 if (searchAndClick(rootNode, 0)) {
-                    lastClickTime = currentTime; // Click successful, timer set
+                    lastClickTime = currentTime;
                 }
             }
         }
@@ -136,9 +136,8 @@ public class MyAccessibilityService extends AccessibilityService {
         if (node.getText() != null) {
             String text = node.getText().toString().toLowerCase().trim();
             for (String keyword : allowKeywords) {
-                if (text.equals(keyword) || text.contains(keyword)) {
+                if (text.contains(keyword)) {
                     if (clickNodeOrParent(node)) {
-                        Log.d("AutoClicker", "Clicked: " + text);
                         return true;
                     }
                 }
