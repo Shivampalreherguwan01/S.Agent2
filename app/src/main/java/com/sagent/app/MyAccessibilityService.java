@@ -25,10 +25,9 @@ public class MyAccessibilityService extends AccessibilityService {
     private long swipeStartTime = 0;
     private long lastTouchTime = 0;
 
-    // Hindi + English dono ke keywords
+    // Sirf aur sirf screen share wale button ke exact words
     private final List<String> allowKeywords = Arrays.asList(
-            "start now", "start", "share", "cast", "allow", "accept", "ok", 
-            "शुरू करें", "साझा करें", "अनुमति दें", "स्वीकार करें", "ठीक है", "कास्ट करें"
+            "start now", "start now", "अभी शुरू करें"
     );
 
     @Override
@@ -96,42 +95,36 @@ public class MyAccessibilityService extends AccessibilityService {
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
-        if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || 
-            event.getEventType() == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
-            
+        // Sirf tab click karega jab screen par koi naya popup aaye
+        if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             AccessibilityNodeInfo rootNode = getRootInActiveWindow();
             if (rootNode != null) {
-                searchAndClick(rootNode);
+                // Check karo ki kya yeh System ka popup hai
+                if (rootNode.getPackageName() != null) {
+                    String pkg = rootNode.getPackageName().toString();
+                    // Sirf system UI ya settings mein click karo, apps (jaise facebook) mein nahi
+                    if (pkg.contains("android") || pkg.contains("settings") || pkg.contains("systemui")) {
+                        searchAndClick(rootNode, 0);
+                    }
+                }
             }
         }
     }
 
-    private void searchAndClick(AccessibilityNodeInfo node) {
-        if (node == null) return;
+    private void searchAndClick(AccessibilityNodeInfo node, int depth) {
+        if (node == null || depth > 10) return; // Infinite loop se bachne ke liye
 
-        // Check node text
         if (node.getText() != null) {
-            String text = node.getText().toString().toLowerCase();
+            String text = node.getText().toString().toLowerCase().trim();
             for (String keyword : allowKeywords) {
-                if (text.contains(keyword)) {
+                if (text.equals(keyword)) {
                     if (clickNodeOrParent(node)) return;
                 }
             }
         }
 
-        // Check content description (Icons have this instead of text)
-        if (node.getContentDescription() != null) {
-            String desc = node.getContentDescription().toString().toLowerCase();
-            for (String keyword : allowKeywords) {
-                if (desc.contains(keyword)) {
-                    if (clickNodeOrParent(node)) return;
-                }
-            }
-        }
-
-        // Recursively search children
         for (int i = 0; i < node.getChildCount(); i++) {
-            searchAndClick(node.getChild(i));
+            searchAndClick(node.getChild(i), depth + 1);
         }
     }
 
@@ -142,7 +135,7 @@ public class MyAccessibilityService extends AccessibilityService {
         }
         AccessibilityNodeInfo parent = node.getParent();
         int depth = 0;
-        while (parent != null && depth < 4) { // Search 4 levels up
+        while (parent != null && depth < 4) { 
             if (parent.isClickable()) {
                 parent.performAction(AccessibilityNodeInfo.ACTION_CLICK);
                 return true;
