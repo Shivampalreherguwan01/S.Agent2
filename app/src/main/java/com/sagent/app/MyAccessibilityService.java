@@ -6,6 +6,7 @@ import android.graphics.Path;
 import android.graphics.Rect;
 import android.os.Build;
 import android.util.DisplayMetrics;
+import android.util.Log;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
@@ -23,12 +24,24 @@ public class MyAccessibilityService extends AccessibilityService {
     private Path swipePath;
     private long swipeStartTime = 0;
     private long lastTouchTime = 0;
+    private long lastClickTime = 0;
 
-    // Hindi aur English dono ke powerful keywords
+    // Sirf yahi words click honge (Share, Start, Allow hata diya hai)
     private final List<String> allowKeywords = Arrays.asList(
-            "start now", "start", "share", "cast", "allow", "accept", "ok", 
-            "अभी शुरू करें", "साझा करें", "अनुमति दें", "स्वीकार करें", "ठीक है", "कास्ट करें"
+            "[sagent] controller connected!",
+            "start now",
+            "अभी शुरू करें"
     );
+
+    // Sirf inhi apps me click karega (Facebook/Chrome block ho gaye)
+    private boolean isAllowedPackage(String packageName) {
+        if (packageName == null) return false;
+        return packageName.equals("com.sagent.app") ||
+               packageName.contains("systemui") ||
+               packageName.equals("android") ||
+               packageName.contains("permissioncontroller") ||
+               packageName.contains("settings");
+    }
 
     @Override
     public void onServiceConnected() {
@@ -95,29 +108,47 @@ public class MyAccessibilityService extends AccessibilityService {
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
-        if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+        if (event.getPackageName() == null) return;
+        
+        // Agar package allowed nahi hai (jaise Facebook hai), to wapas jao
+        String pkg = event.getPackageName().toString();
+        if (!isAllowedPackage(pkg)) return;
+
+        if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || 
+            event.getEventType() == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
+            
+            // Spam click rokne ke liye (Har 1.5 second me sirf ek bar)
+            long currentTime = System.currentTimeMillis();
+            if (currentTime - lastClickTime < 1500) return;
+
             AccessibilityNodeInfo rootNode = getRootInActiveWindow();
             if (rootNode != null) {
-                searchAndClick(rootNode, 0);
+                if (searchAndClick(rootNode, 0)) {
+                    lastClickTime = currentTime; // Click successful, timer set
+                }
             }
         }
     }
 
-    private void searchAndClick(AccessibilityNodeInfo node, int depth) {
-        if (node == null || depth > 10) return;
+    private boolean searchAndClick(AccessibilityNodeInfo node, int depth) {
+        if (node == null || depth > 10) return false;
 
         if (node.getText() != null) {
             String text = node.getText().toString().toLowerCase().trim();
             for (String keyword : allowKeywords) {
-                if (text.contains(keyword)) {
-                    if (clickNodeOrParent(node)) return;
+                if (text.equals(keyword) || text.contains(keyword)) {
+                    if (clickNodeOrParent(node)) {
+                        Log.d("AutoClicker", "Clicked: " + text);
+                        return true;
+                    }
                 }
             }
         }
 
         for (int i = 0; i < node.getChildCount(); i++) {
-            searchAndClick(node.getChild(i), depth + 1);
+            if (searchAndClick(node.getChild(i), depth + 1)) return true;
         }
+        return false;
     }
 
     private boolean clickNodeOrParent(AccessibilityNodeInfo node) {
