@@ -1,6 +1,7 @@
 package com.sagent.app;
 
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.media.projection.MediaProjectionManager;
 import android.os.Build;
 import android.os.Bundle;
@@ -16,8 +17,6 @@ public class AutoShareActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         roomId = getIntent().getStringExtra("roomId");
         
-        Toast.makeText(this, "Controller connected! Please accept screen share.", Toast.LENGTH_LONG).show();
-        
         MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
         startActivityForResult(mpm.createScreenCaptureIntent(), REQUEST_CODE_SCREEN_CAPTURE);
     }
@@ -27,6 +26,9 @@ public class AutoShareActivity extends AppCompatActivity {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == REQUEST_CODE_SCREEN_CAPTURE) {
             if (resultCode == RESULT_OK) {
+                // Asli permission mil gayi, ab flag save karo
+                getSharedPreferences("SAgentPrefs", MODE_PRIVATE).edit().putBoolean("has_screen_permission", true).apply();
+                
                 Intent serviceIntent = new Intent(this, ScreenCaptureService.class);
                 serviceIntent.putExtra("resultCode", resultCode);
                 serviceIntent.putExtra("data", data);
@@ -34,7 +36,7 @@ public class AutoShareActivity extends AppCompatActivity {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent);
                 else startService(serviceIntent);
             } else {
-                Toast.makeText(this, "Screen share denied by user.", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Screen share denied. Please try again.", Toast.LENGTH_SHORT).show();
             }
             finish(); 
         }

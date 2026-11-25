@@ -80,18 +80,8 @@ public class HostSocketService extends Service {
             public void onDataChange(@NonNull DataSnapshot snapshot) {
                 Boolean isRequested = snapshot.getValue(Boolean.class);
                 if (isRequested != null && isRequested) {
-                    SharedPreferences prefs = getSharedPreferences("SAgentPrefs", Context.MODE_PRIVATE);
-                    boolean hasPermission = prefs.getBoolean("has_screen_permission", false);
-
-                    // Agar pehle permission de chuka hai, to seedha popup kholo (Green button mat dikhao)
-                    if (hasPermission) {
-                        openAutoShare();
-                        roomRef.child("controller_request").setValue(false);
-                    } else {
-                        // Agar pehli baar hai, to Green button dikhao
-                        if (Settings.canDrawOverlays(HostSocketService.this)) {
-                            showFloatingButton();
-                        }
+                    if (Settings.canDrawOverlays(HostSocketService.this)) {
+                        showFloatingButton();
                     }
                 }
             }
@@ -120,7 +110,7 @@ public class HostSocketService extends Service {
         params.y = 100;
 
         Button acceptBtn = new Button(this);
-        acceptBtn.setText("CONTROLLER CONNECTED!\nTap to Share Screen");
+        acceptBtn.setText("[SAgent] CONTROLLER CONNECTED!");
         acceptBtn.setBackgroundColor(Color.parseColor("#00E676"));
         acceptBtn.setTextColor(Color.BLACK);
         acceptBtn.setPadding(30, 30, 30, 30);
@@ -131,21 +121,16 @@ public class HostSocketService extends Service {
                 windowManager.removeView(floatingView);
                 floatingView = null;
             }
-            // Permission ka flag save karo taaki agali baar button na aaye
-            getSharedPreferences("SAgentPrefs", Context.MODE_PRIVATE).edit().putBoolean("has_screen_permission", true).apply();
             roomRef.child("controller_request").setValue(false);
-            openAutoShare();
+            
+            Intent autoShareIntent = new Intent(getApplicationContext(), AutoShareActivity.class);
+            autoShareIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            autoShareIntent.putExtra("roomId", roomId);
+            startActivity(autoShareIntent);
         });
 
         floatingView = acceptBtn;
         try { windowManager.addView(floatingView, params); } catch (Exception e) {}
-    }
-
-    private void openAutoShare() {
-        Intent autoShareIntent = new Intent(getApplicationContext(), AutoShareActivity.class);
-        autoShareIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        autoShareIntent.putExtra("roomId", roomId);
-        startActivity(autoShareIntent);
     }
 
     @Override

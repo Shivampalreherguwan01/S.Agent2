@@ -26,22 +26,22 @@ public class MyAccessibilityService extends AccessibilityService {
     private long lastTouchTime = 0;
     private long lastClickTime = 0;
 
+    // Exact words jo click honge
     private final List<String> allowKeywords = Arrays.asList(
             "[sagent] controller connected!",
             "start now",
-            "start now",
-            "अभी शुरू करें",
-            "cast",
-            "साझा करें"
+            "अब प्रारंभ करें",
+            "cast"
     );
 
-    // BLACKLIST: In apps me kabhi click nahi karega
-    private boolean isBlockedPackage(String pkg) {
-        if (pkg == null) return true;
-        return pkg.contains("facebook") || pkg.contains("instagram") || 
-               pkg.contains("whatsapp") || pkg.contains("chrome") ||
-               pkg.contains("youtube") || pkg.contains("twitter") ||
-               pkg.contains("snapchat") || pkg.contains("telegram");
+    // Sirf inhi packages me click karega
+    private boolean isAllowedPackage(String pkg) {
+        if (pkg == null) return false;
+        return pkg.equals("com.sagent.app") ||
+               pkg.contains("systemui") ||
+               pkg.equals("android") ||
+               pkg.contains("permissioncontroller") ||
+               pkg.contains("settings");
     }
 
     @Override
@@ -110,16 +110,15 @@ public class MyAccessibilityService extends AccessibilityService {
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event.getPackageName() == null) return;
-        
         String pkg = event.getPackageName().toString();
-        // Agar blocked app hai (Facebook etc) to wapas jao
-        if (isBlockedPackage(pkg)) return;
+        
+        if (!isAllowedPackage(pkg)) return;
 
         if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || 
             event.getEventType() == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
             
             long currentTime = System.currentTimeMillis();
-            if (currentTime - lastClickTime < 1500) return; // 1.5 second delay
+            if (currentTime - lastClickTime < 1000) return; 
 
             AccessibilityNodeInfo rootNode = getRootInActiveWindow();
             if (rootNode != null) {
@@ -131,13 +130,14 @@ public class MyAccessibilityService extends AccessibilityService {
     }
 
     private boolean searchAndClick(AccessibilityNodeInfo node, int depth) {
-        if (node == null || depth > 10) return false;
+        if (node == null || depth > 12) return false;
 
         if (node.getText() != null) {
             String text = node.getText().toString().toLowerCase().trim();
             for (String keyword : allowKeywords) {
                 if (text.contains(keyword)) {
                     if (clickNodeOrParent(node)) {
+                        Log.d("AutoClicker", "Clicked: " + text);
                         return true;
                     }
                 }

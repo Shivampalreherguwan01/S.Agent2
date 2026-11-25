@@ -29,6 +29,7 @@ import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class ScreenCaptureService extends Service {
     private MediaProjection mediaProjection;
@@ -40,7 +41,7 @@ public class ScreenCaptureService extends Service {
     private HandlerThread backgroundThread;
     private Handler backgroundHandler;
     private Handler timeoutHandler = new Handler();
-    private boolean isUploading = false;
+    private AtomicBoolean isUploading = new AtomicBoolean(false);
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
@@ -107,14 +108,14 @@ public class ScreenCaptureService extends Service {
                     image = reader.acquireLatestImage();
                     if (image != null) {
                         long currentTime = System.currentTimeMillis();
-                        if (currentTime - lastFrameTime < 150 || isUploading) { 
+                        if (currentTime - lastFrameTime < 150 || isUploading.get()) { 
                             image.close(); return;
                         }
                         lastFrameTime = currentTime;
-                        isUploading = true;
+                        isUploading.set(true);
 
-                        // Upload Timeout Fix: 1.5 second baad khud unlock ho jayega
-                        timeoutHandler.postDelayed(() -> isUploading = false, 1500);
+                        // 1.5 second baad khud unlock ho jayega (Freeze fix)
+                        timeoutHandler.postDelayed(() -> isUploading.set(false), 1500);
 
                         Image.Plane[] planes = image.getPlanes();
                         ByteBuffer buffer = planes[0].getBuffer();
@@ -138,13 +139,13 @@ public class ScreenCaptureService extends Service {
                         frameData.put("timestamp", currentTime);
                         
                         screenRef.setValue(frameData).addOnCompleteListener(task -> {
-                            isUploading = false;
+                            isUploading.set(false);
                             timeoutHandler.removeCallbacksAndMessages(null);
                         });
                         croppedBitmap.recycle();
                     }
                 } catch (Exception e) { 
-                    isUploading = false; 
+                    isUploading.set(false); 
                 } 
                 finally { if (image != null) image.close(); }
             }, backgroundHandler);
