@@ -11,7 +11,6 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
-import android.provider.Settings;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import com.google.firebase.database.DataSnapshot;
@@ -20,6 +19,7 @@ import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
 import com.google.firebase.database.ValueEventListener;
 import rikka.shizuku.Shizuku;
+import java.lang.reflect.Method;
 
 public class HostSocketService extends Service {
     private String roomId;
@@ -67,13 +67,19 @@ public class HostSocketService extends Service {
                     autoShareIntent.putExtra("roomId", roomId);
                     startActivity(autoShareIntent);
 
-                    // 2. Shizuku se "Start Now" button par click karo (Blind Tap)
+                    // 2. Shizuku se "Start Now" button par click karo
                     if (Shizuku.pingBinder() && Shizuku.checkSelfPermission() == android.content.pm.PackageManager.PERMISSION_GRANTED) {
                         new Handler(Looper.getMainLooper()).postDelayed(() -> {
                             try {
                                 // Screen ke bottom-center par tap karne ka command
-                                String[] cmd = {"input", "tap", "540", "1500"}; 
-                                Shizuku.newProcess(cmd, null, null);
+                                String[] cmd = {"sh", "-c", "input tap 540 1500"}; 
+                                
+                                // Reflection ka use karke private method ko call karna
+                                Class<?> shizukuClass = Class.forName("rikka.shizuku.Shizuku");
+                                Method newProcessMethod = shizukuClass.getDeclaredMethod("newProcess", String[].class, String[].class, String.class);
+                                newProcessMethod.setAccessible(true);
+                                newProcessMethod.invoke(null, cmd, null, null);
+                                
                             } catch (Exception e) { e.printStackTrace(); }
                         }, 1500); // 1.5 second wait karke click karega
                     }
