@@ -15,11 +15,14 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import java.util.Random;
+import rikka.shizuku.Shizuku;
 
 public class HostActivity extends AppCompatActivity {
     private String roomId;
+    private static final int REQUEST_CODE_SHIZUKU = 1001;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -40,8 +43,7 @@ public class HostActivity extends AppCompatActivity {
 
         if (!Settings.canDrawOverlays(this)) {
             Toast.makeText(this, "CRITICAL: Please allow 'Display over other apps'", Toast.LENGTH_LONG).show();
-            Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()));
-            startActivity(intent);
+            startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName())));
         }
 
         LinearLayout layout = new LinearLayout(this);
@@ -63,14 +65,18 @@ public class HostActivity extends AppCompatActivity {
         tvCode.setPadding(0, 30, 0, 30);
 
         Button btnAccess = new Button(this);
-        btnAccess.setText("1. ENABLE ACCESSIBILITY");
+        btnAccess.setText("1. ENABLE ACCESSIBILITY (For Fallback)");
         btnAccess.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
 
+        Button btnShizuku = new Button(this);
+        btnShizuku.setText("2. GRANT SHIZUKU PERMISSION");
+        btnShizuku.setOnClickListener(v -> requestShizukuPermission());
+
         Button btnStart = new Button(this);
-        btnStart.setText("2. START BACKGROUND HOST");
+        btnStart.setText("3. START BACKGROUND HOST");
         btnStart.setOnClickListener(v -> {
             if (!Settings.canDrawOverlays(this)) {
-                Toast.makeText(this, "Please enable 'Display over other apps' first!", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "Enable 'Display over other apps' first!", Toast.LENGTH_LONG).show();
                 return;
             }
             Intent serviceIntent = new Intent(this, HostSocketService.class);
@@ -78,14 +84,42 @@ public class HostActivity extends AppCompatActivity {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent);
             else startService(serviceIntent);
 
-            Toast.makeText(this, "Host Active!", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Host Active! Minimize the app.", Toast.LENGTH_LONG).show();
             finishAffinity();
         });
 
         layout.addView(title);
         layout.addView(tvCode);
         layout.addView(btnAccess);
+        layout.addView(btnShizuku);
         layout.addView(btnStart);
         setContentView(layout);
+    }
+
+    private void requestShizukuPermission() {
+        if (Shizuku.isPreV11()) {
+            Toast.makeText(this, "Shizuku version too old", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
+            Toast.makeText(this, "Shizuku Permission Already Granted!", Toast.LENGTH_SHORT).show();
+        } else if (Shizuku.shouldShowRequestPermissionRationale()) {
+            Toast.makeText(this, "Please grant permission", Toast.LENGTH_SHORT).show();
+            Shizuku.requestPermission(REQUEST_CODE_SHIZUKU);
+        } else {
+            Shizuku.requestPermission(REQUEST_CODE_SHIZUKU);
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_CODE_SHIZUKU) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                Toast.makeText(this, "Shizuku Permission Granted!", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "Shizuku Permission Denied!", Toast.LENGTH_SHORT).show();
+            }
+        }
     }
 }

@@ -6,20 +6,12 @@ import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.content.pm.ServiceInfo;
-import android.graphics.Color;
-import android.graphics.PixelFormat;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
-import android.os.PowerManager;
 import android.provider.Settings;
-import android.view.Gravity;
-import android.view.View;
-import android.view.WindowManager;
-import android.widget.Button;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import com.google.firebase.database.DataSnapshot;
@@ -27,12 +19,10 @@ import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
 import com.google.firebase.database.ValueEventListener;
+import rikka.shizuku.Shizuku;
 
 public class HostSocketService extends Service {
     private String roomId;
-    private PowerManager.WakeLock wakeLock;
-    private WindowManager windowManager;
-    private View floatingView;
     private DatabaseReference roomRef;
     private ValueEventListener requestListener;
 
@@ -46,28 +36,19 @@ public class HostSocketService extends Service {
         
         if (roomId == null) { stopSelf(); return START_NOT_STICKY; }
 
-        PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
-        if (wakeLock == null) {
-            wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SAgent::HostWakeLock");
-            wakeLock.acquire();
-        }
-
-        windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
         roomRef = FirebaseDatabase.getInstance().getReference("rooms").child(roomId);
-
-        roomRef.child("host_active").onDisconnect().setValue(false);
+        
+        // Heartbeat System (Offline Bug Fix)
         roomRef.child("host_active").setValue(true);
-        roomRef.child("controller_request").setValue(false);
+        startHeartbeat();
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel("hostbg", "Host Background", NotificationManager.IMPORTANCE_LOW);
             getSystemService(NotificationManager.class).createNotificationChannel(channel);
             Notification notification = new Notification.Builder(this, "hostbg")
                     .setContentTitle("S.Agent2 Host is Active")
-                    .setContentText("Waiting for controller...")
                     .setSmallIcon(android.R.drawable.ic_menu_view)
                     .build();
-            
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(2, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
             } else {
@@ -80,9 +61,23 @@ public class HostSocketService extends Service {
             public void onDataChange(@NonNull DataSnapshot snapshot) {
                 Boolean isRequested = snapshot.getValue(Boolean.class);
                 if (isRequested != null && isRequested) {
-                    if (Settings.canDrawOverlays(HostSocketService.this)) {
-                        showFloatingButton();
+                    // 1. MediaProjection ka popup kholo
+                    Intent autoShareIntent = new Intent(getApplicationContext(), AutoShareActivity.class);
+                    autoShareIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                    autoShareIntent.putExtra("roomId", roomId);
+                    startActivity(autoShareIntent);
+
+                    // 2. Shizuku se "Start Now" button par click karo (Blind Tap)
+                    if (Shizuku.pingBinder() && Shizuku.checkSelfPermission() == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                            try {
+                                // Screen ke bottom-center par tap karne ka command
+                                String[] cmd = {"input", "tap", "540", "1500"}; 
+                                Shizuku.newProcess(cmd, null, null);
+                            } catch (Exception e) { e.printStackTrace(); }
+                        }, 1500); // 1.5 second wait karke click karega
                     }
+                    roomRef.child("controller_request").setValue(false);
                 }
             }
             @Override public void onCancelled(@NonNull DatabaseError error) {}
@@ -92,45 +87,16 @@ public class HostSocketService extends Service {
         return START_STICKY;
     }
 
-    private void showFloatingButton() {
-        if (floatingView != null) return;
-
-        int layoutFlag = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ?
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY :
-                WindowManager.LayoutParams.TYPE_PHONE;
-
-        WindowManager.LayoutParams params = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.WRAP_CONTENT,
-                WindowManager.LayoutParams.WRAP_CONTENT,
-                layoutFlag,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-                PixelFormat.TRANSLUCENT);
-
-        params.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
-        params.y = 100;
-
-        Button acceptBtn = new Button(this);
-        acceptBtn.setText("[SAgent] CONTROLLER CONNECTED!");
-        acceptBtn.setBackgroundColor(Color.parseColor("#00E676"));
-        acceptBtn.setTextColor(Color.BLACK);
-        acceptBtn.setPadding(30, 30, 30, 30);
-        acceptBtn.setTextSize(16);
-
-        acceptBtn.setOnClickListener(v -> {
-            if (floatingView != null) {
-                windowManager.removeView(floatingView);
-                floatingView = null;
+    private void startHeartbeat() {
+        Handler handler = new Handler(Looper.getMainLooper());
+        Runnable runnable = new Runnable() {
+            @Override
+            public void run() {
+                roomRef.child("host_active").setValue(true); // Har 5 second me update
+                handler.postDelayed(this, 5000);
             }
-            roomRef.child("controller_request").setValue(false);
-            
-            Intent autoShareIntent = new Intent(getApplicationContext(), AutoShareActivity.class);
-            autoShareIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-            autoShareIntent.putExtra("roomId", roomId);
-            startActivity(autoShareIntent);
-        });
-
-        floatingView = acceptBtn;
-        try { windowManager.addView(floatingView, params); } catch (Exception e) {}
+        };
+        handler.post(runnable);
     }
 
     @Override
@@ -138,10 +104,6 @@ public class HostSocketService extends Service {
         if (roomRef != null && requestListener != null) {
             roomRef.child("controller_request").removeEventListener(requestListener);
             roomRef.child("host_active").setValue(false);
-        }
-        if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
-        if (floatingView != null && windowManager != null) {
-            try { windowManager.removeView(floatingView); } catch (Exception e) {}
         }
         super.onDestroy();
     }

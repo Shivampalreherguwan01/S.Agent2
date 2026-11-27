@@ -12,7 +12,6 @@ import android.util.DisplayMetrics;
 import android.view.Display;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
-import android.view.accessibility.AccessibilityNodeInfo;
 import androidx.annotation.NonNull;
 import com.google.firebase.database.DataSnapshot;
 import com.google.firebase.database.DatabaseError;
@@ -20,9 +19,7 @@ import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
 import com.google.firebase.database.ValueEventListener;
 import java.io.ByteArrayOutputStream;
-import java.util.Arrays;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 public class MyAccessibilityService extends AccessibilityService {
@@ -30,16 +27,11 @@ public class MyAccessibilityService extends AccessibilityService {
     private Path swipePath;
     private long swipeStartTime = 0;
     private long lastTouchTime = 0;
-    private long lastClickTime = 0;
     private boolean isFallbackMode = false;
     private boolean isTakingScreenshot = false;
     
     private DatabaseReference roomRef;
     private DatabaseReference screenRef;
-
-    private final List<String> allowKeywords = Arrays.asList(
-            "start now", "अब प्रारंभ करें"
-    );
 
     @Override
     public void onServiceConnected() {
@@ -48,7 +40,7 @@ public class MyAccessibilityService extends AccessibilityService {
         roomRef = FirebaseDatabase.getInstance().getReference("rooms").child(roomId);
         screenRef = roomRef.child("screen");
 
-        // Stream Mode Check (Fallback ya MediaProjection)
+        // Stream Mode Check
         roomRef.child("stream_mode").addValueEventListener(new ValueEventListener() {
             @Override
             public void onDataChange(@NonNull DataSnapshot snapshot) {
@@ -63,7 +55,7 @@ public class MyAccessibilityService extends AccessibilityService {
             @Override public void onCancelled(@NonNull DatabaseError error) {}
         });
 
-        // Touch Gestures Listener
+        // Touch Gestures
         DatabaseReference touchRef = roomRef.child("touch");
         touchRef.addValueEventListener(new ValueEventListener() {
             @Override
@@ -122,7 +114,6 @@ public class MyAccessibilityService extends AccessibilityService {
         });
     }
 
-    // FALLBACK LOOP (1-2 FPS)
     private void startFallbackLoop() {
         android.os.Handler handler = new android.os.Handler(android.os.Looper.getMainLooper());
         Runnable runnable = new Runnable() {
@@ -151,69 +142,18 @@ public class MyAccessibilityService extends AccessibilityService {
                                 scaledBitmap.recycle();
                             }
                         }
-
-                        @Override
-                        public void onFailure(int errorCode) {
-                            isTakingScreenshot = false;
-                        }
+                        @Override public void onFailure(int errorCode) { isTakingScreenshot = false; }
                     });
                     isTakingScreenshot = true;
                 }
-                handler.postDelayed(this, 500); // 2 FPS
+                handler.postDelayed(this, 500);
             }
         };
         handler.post(runnable);
     }
 
-    @Override
-    public void onAccessibilityEvent(AccessibilityEvent event) {
-        if (event.getPackageName() == null) return;
-        String pkg = event.getPackageName().toString();
-
-        if (pkg.equals("com.android.systemui") || pkg.contains("permissioncontroller")) {
-            if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || 
-                event.getEventType() == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
-                
-                long currentTime = System.currentTimeMillis();
-                if (currentTime - lastClickTime < 1000) return; 
-
-                AccessibilityNodeInfo rootNode = getRootInActiveWindow();
-                if (rootNode != null) {
-                    if (searchAndClick(rootNode, 0)) {
-                        lastClickTime = currentTime;
-                    }
-                }
-            }
-        }
-    }
-
-    private boolean searchAndClick(AccessibilityNodeInfo node, int depth) {
-        if (node == null || depth > 10) return false;
-        if (node.getText() != null) {
-            String text = node.getText().toString().toLowerCase().trim();
-            for (String keyword : allowKeywords) {
-                if (text.contains(keyword)) {
-                    if (clickNodeOrParent(node)) return true;
-                }
-            }
-        }
-        for (int i = 0; i < node.getChildCount(); i++) {
-            if (searchAndClick(node.getChild(i), depth + 1)) return true;
-        }
-        return false;
-    }
-
-    private boolean clickNodeOrParent(AccessibilityNodeInfo node) {
-        if (node.isClickable() && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true;
-        AccessibilityNodeInfo parent = node.getParent();
-        int depth = 0;
-        while (parent != null && depth < 3) { 
-            if (parent.isClickable() && parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true;
-            parent = parent.getParent();
-            depth++;
-        }
-        return false;
-    }
+    @Override public void onAccessibilityEvent(AccessibilityEvent event) {}
+    @Override public void onInterrupt() {}
 
     private void performGlobalActionFromCommand(String cmd) {
         if (cmd == null) return;
@@ -228,7 +168,7 @@ public class MyAccessibilityService extends AccessibilityService {
             case "RIGHT": performSwipe(0.3f, 0.5f, 0.7f, 0.5f); break; 
         }
     }
-
+    
     private void performSwipe(float startXRatio, float startYRatio, float endXRatio, float endYRatio) {
         WindowManager wm = (WindowManager) getSystemService(WINDOW_SERVICE);
         int screenWidth = 1080, screenHeight = 1920;
@@ -253,6 +193,4 @@ public class MyAccessibilityService extends AccessibilityService {
         builder.addStroke(stroke);
         dispatchGesture(builder.build(), null, null);
     }
-
-    @Override public void onInterrupt() {}
 }
