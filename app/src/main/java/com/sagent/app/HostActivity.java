@@ -25,7 +25,7 @@ public class HostActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         SharedPreferences prefs = getSharedPreferences("SAgentPrefs", Context.MODE_PRIVATE);
-        
+
         roomId = prefs.getString("roomId", null);
         if (roomId == null) {
             roomId = "SA-" + (100000 + new Random().nextInt(900000));
@@ -37,7 +37,7 @@ public class HostActivity extends AppCompatActivity {
                 requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 2);
             }
         }
-        
+
         if (!Settings.canDrawOverlays(this)) {
             Toast.makeText(this, "CRITICAL: Please allow 'Display over other apps'", Toast.LENGTH_LONG).show();
             Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()));
@@ -77,9 +77,9 @@ public class HostActivity extends AppCompatActivity {
             serviceIntent.putExtra("roomId", roomId);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent);
             else startService(serviceIntent);
-            
-            Toast.makeText(this, "Host Active! You can minimize the app.", Toast.LENGTH_LONG).show();
-            finishAffinity(); 
+
+            Toast.makeText(this, "Host Active!", Toast.LENGTH_LONG).show();
+            finishAffinity();
         });
 
         layout.addView(title);

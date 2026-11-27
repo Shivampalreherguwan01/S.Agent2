@@ -20,7 +20,6 @@ import android.os.HandlerThread;
 import android.os.IBinder;
 import android.util.Base64;
 import android.util.DisplayMetrics;
-import android.util.Log;
 import android.view.WindowManager;
 import androidx.annotation.Nullable;
 import com.google.firebase.database.DatabaseReference;
@@ -36,11 +35,11 @@ public class ScreenCaptureService extends Service {
     private VirtualDisplay virtualDisplay;
     private ImageReader imageReader;
     private String roomId;
+    private DatabaseReference roomRef;
     private DatabaseReference screenRef;
     private long lastFrameTime = 0;
     private HandlerThread backgroundThread;
     private Handler backgroundHandler;
-    private Handler timeoutHandler = new Handler();
     private AtomicBoolean isUploading = new AtomicBoolean(false);
 
     @Override
@@ -68,7 +67,11 @@ public class ScreenCaptureService extends Service {
         Intent data = intent.getParcelableExtra("data");
         roomId = intent.getStringExtra("roomId");
         
-        screenRef = FirebaseDatabase.getInstance().getReference("rooms").child(roomId).child("screen");
+        roomRef = FirebaseDatabase.getInstance().getReference("rooms").child(roomId);
+        screenRef = roomRef.child("screen");
+        
+        // Stream mode set to MediaProjection
+        roomRef.child("stream_mode").setValue("mediaprojection");
 
         backgroundThread = new HandlerThread("CaptureThread");
         backgroundThread.start();
@@ -80,7 +83,11 @@ public class ScreenCaptureService extends Service {
         if (mediaProjection != null) {
             mediaProjection.registerCallback(new MediaProjection.Callback() {
                 @Override
-                public void onStop() { super.onStop(); stopSelf(); }
+                public void onStop() { 
+                    super.onStop(); 
+                    roomRef.child("stream_mode").setValue("fallback"); // Fallback activate
+                    stopSelf(); 
+                }
             }, backgroundHandler);
             startScreenCapture();
         }
@@ -114,9 +121,6 @@ public class ScreenCaptureService extends Service {
                         lastFrameTime = currentTime;
                         isUploading.set(true);
 
-                        // 1.5 second baad khud unlock ho jayega (Freeze fix)
-                        timeoutHandler.postDelayed(() -> isUploading.set(false), 1500);
-
                         Image.Plane[] planes = image.getPlanes();
                         ByteBuffer buffer = planes[0].getBuffer();
                         int pixelStride = planes[0].getPixelStride();
@@ -138,10 +142,7 @@ public class ScreenCaptureService extends Service {
                         frameData.put("height", height);
                         frameData.put("timestamp", currentTime);
                         
-                        screenRef.setValue(frameData).addOnCompleteListener(task -> {
-                            isUploading.set(false);
-                            timeoutHandler.removeCallbacksAndMessages(null);
-                        });
+                        screenRef.setValue(frameData).addOnCompleteListener(task -> isUploading.set(false));
                         croppedBitmap.recycle();
                     }
                 } catch (Exception e) { 
@@ -154,6 +155,7 @@ public class ScreenCaptureService extends Service {
 
     @Override
     public void onDestroy() {
+        if (roomRef != null) roomRef.child("stream_mode").setValue("fallback"); // Service marne par fallback
         if (virtualDisplay != null) virtualDisplay.release();
         if (imageReader != null) imageReader.close();
         if (mediaProjection != null) mediaProjection.stop();
