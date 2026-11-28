@@ -1,129 +1,133 @@
 package com.sagent.app;
 
-import android.content.Context;
-import android.content.Intent;
-import android.content.SharedPreferences;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.media.AudioAttributes;
+import android.media.AudioFormat;
+import android.media.AudioTrack;
 import android.os.Bundle;
-import android.text.InputType;
+import android.util.Base64;
 import android.view.Gravity;
 import android.widget.Button;
-import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.TextView;
-import androidx.appcompat.app.AlertDialog;
+import android.widget.Toast;
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
+import com.google.firebase.database.DataSnapshot;
+import com.google.firebase.database.DatabaseError;
+import com.google.firebase.database.DatabaseReference;
+import com.google.firebase.database.FirebaseDatabase;
+import com.google.firebase.database.ValueEventListener;
 
 public class ControllerActivity extends AppCompatActivity {
-    private LinearLayout deviceList;
-    private SharedPreferences prefs;
+    private String roomId;
+    private ImageView imageView;
+    private Button btnCam, btnMic;
+    private DatabaseReference roomRef;
+    private boolean isCamOn = false, isMicOn = false;
+    private AudioTrack audioTrack;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        prefs = getSharedPreferences("SAgentPrefs", Context.MODE_PRIVATE);
+        roomId = getIntent().getStringExtra("roomId"); // From MainActivity
 
-        LinearLayout mainLayout = new LinearLayout(this);
-        mainLayout.setOrientation(LinearLayout.VERTICAL);
-        mainLayout.setBackgroundColor(Color.parseColor("#121212"));
-        mainLayout.setPadding(40, 40, 40, 40);
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setGravity(Gravity.CENTER);
+        layout.setBackgroundColor(Color.BLACK);
+        layout.setPadding(30, 30, 30, 30);
 
-        TextView title = new TextView(this);
-        title.setText("My Devices");
-        title.setTextColor(Color.WHITE);
-        title.setTextSize(28);
-        title.setPadding(0, 0, 0, 30);
+        imageView = new ImageView(this);
+        LinearLayout.LayoutParams imgParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f);
+        imageView.setLayoutParams(imgParams);
 
-        deviceList = new LinearLayout(this);
-        deviceList.setOrientation(LinearLayout.VERTICAL);
+        btnCam = new Button(this);
+        btnCam.setText("TURN CAMERA ON");
+        btnCam.setOnClickListener(v -> toggleCamera());
 
-        Button btnAdd = new Button(this);
-        btnAdd.setText("+ Add Device (Enter Code)");
-        btnAdd.setBackgroundColor(Color.parseColor("#6200EE"));
-        btnAdd.setTextColor(Color.WHITE);
-        btnAdd.setOnClickListener(v -> showAddDeviceDialog());
+        btnMic = new Button(this);
+        btnMic.setText("TURN MIC ON");
+        btnMic.setOnClickListener(v -> toggleMic());
 
-        mainLayout.addView(title);
-        mainLayout.addView(deviceList);
-        mainLayout.addView(btnAdd);
-        setContentView(mainLayout);
+        layout.addView(imageView);
+        layout.addView(btnCam);
+        layout.addView(btnMic);
+        setContentView(layout);
 
-        loadSavedDevices();
-    }
+        setupAudioTrack();
+        roomRef = FirebaseDatabase.getInstance().getReference("rooms").child(roomId);
 
-    private void showAddDeviceDialog() {
-        AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        builder.setTitle("Enter Pairing Code");
-
-        final EditText input = new EditText(this);
-        input.setInputType(InputType.TYPE_CLASS_TEXT);
-        input.setHint("e.g. SA-123456");
-        builder.setView(input);
-
-        builder.setPositiveButton("Connect", (dialog, which) -> {
-            String code = input.getText().toString().trim();
-            if (!code.isEmpty()) {
-                saveDevice(code);
-                Intent intent = new Intent(this, LiveControlActivity.class);
-                intent.putExtra("roomId", code);
-                startActivity(intent);
+        // Listen for Camera Frames
+        roomRef.child("camera_frame").addValueEventListener(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot snapshot) {
+                if (snapshot.exists()) {
+                    String base64 = snapshot.child("image").getValue(String.class);
+                    if (base64 != null) {
+                        byte[] bytes = Base64.decode(base64, Base64.NO_WRAP);
+                        Bitmap bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                        runOnUiThread(() -> imageView.setImageBitmap(bmp));
+                    }
+                }
             }
+            @Override public void onCancelled(@NonNull DatabaseError error) {}
         });
-        builder.setNegativeButton("Cancel", (dialog, which) -> dialog.cancel());
-        builder.show();
+
+        // Listen for Audio
+        roomRef.child("audio_chunk").addValueEventListener(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot snapshot) {
+                String base64 = snapshot.getValue(String.class);
+                if (base64 != null && audioTrack != null) {
+                    byte[] bytes = Base64.decode(base64, Base64.NO_WRAP);
+                    audioTrack.write(bytes, 0, bytes.length);
+                }
+            }
+            @Override public void onCancelled(@NonNull DatabaseError error) {}
+        });
     }
 
-    private void saveDevice(String code) {
-        String saved = prefs.getString("savedDevices", "");
-        if (!saved.contains(code)) {
-            saved = saved.isEmpty() ? code : saved + "," + code;
-            prefs.edit().putString("savedDevices", saved).apply();
-            loadSavedDevices();
-        }
+    private void toggleCamera() {
+        isCamOn = !isCamOn;
+        btnCam.setText(isCamOn ? "TURN CAMERA OFF" : "TURN CAMERA ON");
+        roomRef.child("camera_control").setValue(isCamOn);
     }
 
-    private void loadSavedDevices() {
-        deviceList.removeAllViews();
-        String saved = prefs.getString("savedDevices", "");
-        if (saved.isEmpty()) {
-            TextView empty = new TextView(this);
-            empty.setText("No devices added yet.");
-            empty.setTextColor(Color.GRAY);
-            deviceList.addView(empty);
-            return;
+    private void toggleMic() {
+        isMicOn = !isMicOn;
+        btnMic.setText(isMicOn ? "TURN MIC OFF" : "TURN MIC ON");
+        roomRef.child("mic_control").setValue(isMicOn);
+    }
+
+    private void setupAudioTrack() {
+        int sampleRate = 16000;
+        int bufferSize = AudioTrack.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT);
+        audioTrack = new AudioTrack.Builder()
+                .setAudioAttributes(new AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build())
+                .setAudioFormat(new AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(sampleRate)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                        .build())
+                .setBufferSizeInBytes(bufferSize)
+                .setTransferMode(AudioTrack.MODE_STREAM)
+                .build();
+        audioTrack.play();
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (audioTrack != null) {
+            audioTrack.stop();
+            audioTrack.release();
         }
-
-        String[] devices = saved.split(",");
-        for (String code : devices) {
-            LinearLayout card = new LinearLayout(this);
-            card.setOrientation(LinearLayout.HORIZONTAL);
-            card.setBackgroundColor(Color.parseColor("#1E1E1E"));
-            card.setPadding(30, 30, 30, 30);
-            card.setGravity(Gravity.CENTER_VERTICAL);
-            
-            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT);
-            params.setMargins(0, 0, 0, 20);
-            card.setLayoutParams(params);
-
-            TextView tvName = new TextView(this);
-            tvName.setText("Device: " + code);
-            tvName.setTextColor(Color.WHITE);
-            tvName.setTextSize(18);
-            tvName.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-
-            Button btnControl = new Button(this);
-            btnControl.setText("Control");
-            btnControl.setOnClickListener(v -> {
-                Intent intent = new Intent(this, LiveControlActivity.class);
-                intent.putExtra("roomId", code);
-                startActivity(intent);
-            });
-
-            card.addView(tvName);
-            card.addView(btnControl);
-            deviceList.addView(card);
-        }
+        super.onDestroy();
     }
 }
