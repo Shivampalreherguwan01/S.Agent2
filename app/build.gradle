@@ -9,7 +9,7 @@ android {
 
     defaultConfig {
         applicationId "com.sagent.app"
-        minSdk 24
+        minSdk 24 // PDF me 34 tha, isliye Android 11 me install nahi ho raha tha
         targetSdk 34
         versionCode 1
         versionName "1.0"
