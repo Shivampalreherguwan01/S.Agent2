@@ -3,10 +3,7 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
@@ -25,9 +22,7 @@
         <activity android:name=".HostActivity" android:exported="false" />
         <activity android:name=".ControllerActivity" android:exported="false" />
         <activity android:name=".LiveControlActivity" android:exported="false" />
-        <activity android:name=".AutoShareActivity" android:exported="false" android:theme="@style/Theme.AppCompat.Translucent" />
 
-        <service android:name=".ScreenCaptureService" android:foregroundServiceType="mediaProjection" android:exported="false" />
         <service android:name=".HostSocketService" android:foregroundServiceType="dataSync" android:exported="false" />
 
         <service
@@ -41,14 +36,5 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
         </service>
-
-        <!-- Shizuku Provider -->
-        <provider
-            android:name="rikka.shizuku.ShizukuProvider"
-            android:authorities="${applicationId}.shizuku"
-            android:multiprocess="false"
-            android:enabled="true"
-            android:exported="true"
-            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
     </application>
 </manifest>

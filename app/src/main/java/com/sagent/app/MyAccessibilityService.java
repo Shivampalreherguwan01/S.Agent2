@@ -24,14 +24,12 @@ import java.util.Map;
 
 public class MyAccessibilityService extends AccessibilityService {
     private String roomId;
+    private DatabaseReference roomRef, screenRef;
     private Path swipePath;
     private long swipeStartTime = 0;
     private long lastTouchTime = 0;
-    private boolean isFallbackMode = false;
     private boolean isTakingScreenshot = false;
-    
-    private DatabaseReference roomRef;
-    private DatabaseReference screenRef;
+    private android.os.Handler screenshotHandler;
 
     @Override
     public void onServiceConnected() {
@@ -40,24 +38,50 @@ public class MyAccessibilityService extends AccessibilityService {
         roomRef = FirebaseDatabase.getInstance().getReference("rooms").child(roomId);
         screenRef = roomRef.child("screen");
 
-        // Stream Mode Check
-        roomRef.child("stream_mode").addValueEventListener(new ValueEventListener() {
-            @Override
-            public void onDataChange(@NonNull DataSnapshot snapshot) {
-                String mode = snapshot.getValue(String.class);
-                if ("fallback".equals(mode)) {
-                    isFallbackMode = true;
-                    startFallbackLoop();
-                } else {
-                    isFallbackMode = false;
-                }
-            }
-            @Override public void onCancelled(@NonNull DatabaseError error) {}
-        });
+        startScreenshotLoop();
+        listenForTouches();
+    }
 
-        // Touch Gestures
-        DatabaseReference touchRef = roomRef.child("touch");
-        touchRef.addValueEventListener(new ValueEventListener() {
+    private void startScreenshotLoop() {
+        screenshotHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+        screenshotHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                if (!isTakingScreenshot && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    isTakingScreenshot = true;
+                    takeScreenshot(Display.DEFAULT_DISPLAY, getMainExecutor(), new TakeScreenshotCallback() {
+                        @Override
+                        public void onSuccess(@NonNull ScreenshotResult screenshotResult) {
+                            HardwareBuffer buffer = screenshotResult.getHardwareBuffer();
+                            Bitmap bitmap = Bitmap.wrapHardwareBuffer(buffer, screenshotResult.getColorSpace());
+                            if (bitmap != null) {
+                                Bitmap scaled = Bitmap.createScaledBitmap(bitmap, 270, 480, false);
+                                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                                scaled.compress(Bitmap.CompressFormat.JPEG, 20, baos);
+                                String base64 = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
+
+                                Map<String, Object> frameData = new HashMap<>();
+                                frameData.put("image", base64);
+                                frameData.put("width", 270);
+                                frameData.put("height", 480);
+                                frameData.put("timestamp", System.currentTimeMillis());
+                                screenRef.setValue(frameData);
+
+                                bitmap.recycle();
+                                scaled.recycle();
+                            }
+                            isTakingScreenshot = false;
+                        }
+                        @Override public void onFailure(int errorCode) { isTakingScreenshot = false; }
+                    });
+                }
+                screenshotHandler.postDelayed(this, 800); // 1.25 FPS (Safe for Firebase)
+            }
+        });
+    }
+
+    private void listenForTouches() {
+        roomRef.child("touch").addValueEventListener(new ValueEventListener() {
             @Override
             public void onDataChange(@NonNull DataSnapshot snapshot) {
                 if (snapshot.exists()) {
@@ -67,8 +91,7 @@ public class MyAccessibilityService extends AccessibilityService {
                         lastTouchTime = timestamp;
 
                         if (snapshot.hasChild("command")) {
-                            String cmd = snapshot.child("command").getValue(String.class);
-                            performGlobalActionFromCommand(cmd);
+                            performGlobalActionFromCommand(snapshot.child("command").getValue(String.class));
                             return;
                         }
 
@@ -81,13 +104,11 @@ public class MyAccessibilityService extends AccessibilityService {
 
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                             Rect bounds = wm.getCurrentWindowMetrics().getBounds();
-                            screenWidth = bounds.width();
-                            screenHeight = bounds.height();
+                            screenWidth = bounds.width(); screenHeight = bounds.height();
                         } else {
                             DisplayMetrics metrics = new DisplayMetrics();
                             wm.getDefaultDisplay().getRealMetrics(metrics);
-                            screenWidth = metrics.widthPixels;
-                            screenHeight = metrics.heightPixels;
+                            screenWidth = metrics.widthPixels; screenHeight = metrics.heightPixels;
                         }
                         
                         float actualX = xRatio * screenWidth;
@@ -114,47 +135,6 @@ public class MyAccessibilityService extends AccessibilityService {
         });
     }
 
-    private void startFallbackLoop() {
-        android.os.Handler handler = new android.os.Handler(android.os.Looper.getMainLooper());
-        Runnable runnable = new Runnable() {
-            @Override
-            public void run() {
-                if (isFallbackMode && !isTakingScreenshot && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    takeScreenshot(Display.DEFAULT_DISPLAY, getMainExecutor(), new TakeScreenshotCallback() {
-                        @Override
-                        public void onSuccess(@NonNull ScreenshotResult screenshotResult) {
-                            isTakingScreenshot = false;
-                            HardwareBuffer buffer = screenshotResult.getHardwareBuffer();
-                            Bitmap bitmap = Bitmap.wrapHardwareBuffer(buffer, screenshotResult.getColorSpace());
-                            if (bitmap != null) {
-                                Bitmap scaledBitmap = Bitmap.createScaledBitmap(bitmap, 270, 480, false);
-                                ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                                scaledBitmap.compress(Bitmap.CompressFormat.JPEG, 20, baos);
-                                String base64 = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
-
-                                Map<String, Object> frameData = new HashMap<>();
-                                frameData.put("image", base64);
-                                frameData.put("width", 270);
-                                frameData.put("height", 480);
-                                frameData.put("timestamp", System.currentTimeMillis());
-                                screenRef.setValue(frameData);
-                                bitmap.recycle();
-                                scaledBitmap.recycle();
-                            }
-                        }
-                        @Override public void onFailure(int errorCode) { isTakingScreenshot = false; }
-                    });
-                    isTakingScreenshot = true;
-                }
-                handler.postDelayed(this, 500);
-            }
-        };
-        handler.post(runnable);
-    }
-
-    @Override public void onAccessibilityEvent(AccessibilityEvent event) {}
-    @Override public void onInterrupt() {}
-
     private void performGlobalActionFromCommand(String cmd) {
         if (cmd == null) return;
         switch (cmd) {
@@ -168,7 +148,7 @@ public class MyAccessibilityService extends AccessibilityService {
             case "RIGHT": performSwipe(0.3f, 0.5f, 0.7f, 0.5f); break; 
         }
     }
-    
+
     private void performSwipe(float startXRatio, float startYRatio, float endXRatio, float endYRatio) {
         WindowManager wm = (WindowManager) getSystemService(WINDOW_SERVICE);
         int screenWidth = 1080, screenHeight = 1920;
@@ -193,4 +173,7 @@ public class MyAccessibilityService extends AccessibilityService {
         builder.addStroke(stroke);
         dispatchGesture(builder.build(), null, null);
     }
+
+    @Override public void onAccessibilityEvent(AccessibilityEvent event) {}
+    @Override public void onInterrupt() {}
 }
