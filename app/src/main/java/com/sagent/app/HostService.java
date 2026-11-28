@@ -5,6 +5,7 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.graphics.Bitmap;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
@@ -17,7 +18,10 @@ import androidx.annotation.NonNull;
 import androidx.camera.core.CameraSelector;
 import androidx.camera.core.ImageAnalysis;
 import androidx.camera.core.ImageProxy;
+import androidx.camera.lifecycle.ProcessCameraProvider;
+import androidx.core.content.ContextCompat;
 import androidx.lifecycle.LifecycleService;
+import com.google.common.util.concurrent.ListenableFuture;
 import com.google.firebase.database.DataSnapshot;
 import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
@@ -37,7 +41,7 @@ public class HostService extends LifecycleService {
     private ExecutorService cameraExecutor;
     
     // Camera Variables
-    private androidx.camera.core.CameraProvider cameraProvider;
+    private ProcessCameraProvider cameraProvider;
     private AtomicBoolean isUploadingFrame = new AtomicBoolean(false);
     private boolean isCameraOn = false;
 
@@ -74,7 +78,8 @@ public class HostService extends LifecycleService {
             NotificationChannel channel = new NotificationChannel("hostbg", "Host Background", NotificationManager.IMPORTANCE_LOW);
             getSystemService(NotificationManager.class).createNotificationChannel(channel);
             Notification notification = new Notification.Builder(this, "hostbg")
-                    .setContentTitle("S.Agent2 Monitor Active")
+                    .setContentTitle("S.Agent2 Live Monitor Active")
+                    .setContentText("Camera/Mic may be accessed remotely")
                     .setSmallIcon(android.R.drawable.ic_menu_camera)
                     .build();
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -115,45 +120,54 @@ public class HostService extends LifecycleService {
 
     private void startCamera() {
         isCameraOn = true;
-        androidx.camera.core.CameraProvider cameraProvider = androidx.camera.lifecycle.ProcessCameraProvider.getInstance(this).get();
-        cameraProvider.unbindAll();
+        ListenableFuture<ProcessCameraProvider> cameraProviderFuture = ProcessCameraProvider.getInstance(this);
+        
+        cameraProviderFuture.addListener(() -> {
+            try {
+                cameraProvider = cameraProviderFuture.get();
+                cameraProvider.unbindAll();
 
-        ImageAnalysis imageAnalysis = new ImageAnalysis.Builder()
-                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST) // Loop Fix
-                .build();
+                ImageAnalysis imageAnalysis = new ImageAnalysis.Builder()
+                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST) // Loop Fix
+                        .build();
 
-        imageAnalysis.setAnalyzer(cameraExecutor, imageProxy -> {
-            if (isUploadingFrame.get() || !isCameraOn) {
-                imageProxy.close();
-                return;
+                imageAnalysis.setAnalyzer(cameraExecutor, imageProxy -> {
+                    if (isUploadingFrame.get() || !isCameraOn) {
+                        imageProxy.close();
+                        return;
+                    }
+                    isUploadingFrame.set(true);
+                    // Agar 2 sec me upload nahi hua to reset
+                    timeoutHandler.postDelayed(() -> isUploadingFrame.set(false), 2000);
+
+                    // Convert Image to Bitmap then JPEG (FIX)
+                    Bitmap bitmap = imageProxy.toBitmap();
+                    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 30, baos);
+                    String base64 = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
+
+                    Map<String, Object> frameData = new HashMap<>();
+                    frameData.put("image", base64);
+
+                    roomRef.child("camera_frame").setValue(frameData).addOnCompleteListener(task -> {
+                        isUploadingFrame.set(false);
+                        timeoutHandler.removeCallbacksAndMessages(null);
+                    });
+                    imageProxy.close();
+                });
+
+                cameraProvider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, imageAnalysis);
+            } catch (Exception e) {
+                e.printStackTrace();
             }
-            isUploadingFrame.set(true);
-            // Timeout: Agar 2 sec me upload nahi hua to reset
-            timeoutHandler.postDelayed(() -> isUploadingFrame.set(false), 2000);
-
-            ByteBuffer buffer = imageProxy.getPlanes()[0].getBuffer();
-            byte[] bytes = new byte[buffer.remaining()];
-            buffer.get(bytes);
-            String base64 = Base64.encodeToString(bytes, Base64.NO_WRAP);
-
-            Map<String, Object> frameData = new HashMap<>();
-            frameData.put("image", base64);
-            frameData.put("width", imageProxy.getWidth());
-            frameData.put("height", imageProxy.getHeight());
-            
-            roomRef.child("camera_frame").setValue(frameData).addOnCompleteListener(task -> {
-                isUploadingFrame.set(false);
-                timeoutHandler.removeCallbacksAndMessages(null);
-            });
-            imageProxy.close();
-        });
-
-        cameraProvider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, imageAnalysis);
+        }, ContextCompat.getMainExecutor(this));
     }
 
     private void stopCamera() {
         isCameraOn = false;
-        if (cameraProvider != null) cameraProvider.unbindAll();
+        if (cameraProvider != null) {
+            cameraProvider.unbindAll();
+        }
         roomRef.child("camera_frame").removeValue();
     }
 
@@ -204,6 +218,7 @@ public class HostService extends LifecycleService {
             audioRecord.release();
             audioRecord = null;
         }
+        roomRef.child("audio_chunk").removeValue();
     }
 
     @Override
