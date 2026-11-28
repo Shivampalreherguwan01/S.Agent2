@@ -17,9 +17,14 @@ import com.google.firebase.database.FirebaseDatabase;
 public class HostSocketService extends Service {
     private String roomId;
     private DatabaseReference roomRef;
+    private Handler heartbeatHandler;
+    private Runnable heartbeatRunnable;
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        // 1. FOREGROUND SABSE PEHLE (Android 14 Rule)
+        startForegroundService();
+
         if (intent != null && intent.hasExtra("roomId")) {
             roomId = intent.getStringExtra("roomId");
         } else {
@@ -29,9 +34,13 @@ public class HostSocketService extends Service {
         if (roomId == null) { stopSelf(); return START_NOT_STICKY; }
 
         roomRef = FirebaseDatabase.getInstance().getReference("rooms").child(roomId);
-        roomRef.child("host_active").setValue(true);
+        roomRef.child("host_active").onDisconnect().setValue(false);
+        
         startHeartbeat();
+        return START_STICKY;
+    }
 
+    private void startForegroundService() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel("hostbg", "Host Background", NotificationManager.IMPORTANCE_LOW);
             getSystemService(NotificationManager.class).createNotificationChannel(channel);
@@ -45,22 +54,33 @@ public class HostSocketService extends Service {
                 startForeground(2, notification);
             }
         }
-        return START_STICKY;
     }
 
     private void startHeartbeat() {
-        Handler handler = new Handler(Looper.getMainLooper());
-        handler.post(new Runnable() {
+        if (heartbeatHandler != null) return;
+        heartbeatHandler = new Handler(Looper.getMainLooper());
+        heartbeatRunnable = new Runnable() {
             @Override
             public void run() {
-                if(roomRef != null) roomRef.child("host_active").setValue(true);
-                handler.postDelayed(this, 5000);
+                if (roomRef != null) roomRef.child("host_active").setValue(true);
+                heartbeatHandler.postDelayed(this, 5000);
             }
-        });
+        };
+        heartbeatHandler.post(heartbeatRunnable);
+    }
+
+    // Recent Apps se swipe karne par bhi ye service zinda rahegi
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        if (roomRef != null) roomRef.child("host_active").setValue(true);
+        super.onTaskRemoved(rootIntent);
     }
 
     @Override
     public void onDestroy() {
+        if (heartbeatHandler != null && heartbeatRunnable != null) {
+            heartbeatHandler.removeCallbacks(heartbeatRunnable);
+        }
         if (roomRef != null) roomRef.child("host_active").setValue(false);
         super.onDestroy();
     }

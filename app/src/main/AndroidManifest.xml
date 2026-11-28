@@ -3,6 +3,8 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- YE PERMISSION MISSING THI ANDROID 14 KE LIYE -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
@@ -23,7 +25,12 @@
         <activity android:name=".ControllerActivity" android:exported="false" />
         <activity android:name=".LiveControlActivity" android:exported="false" />
 
-        <service android:name=".HostSocketService" android:foregroundServiceType="dataSync" android:exported="false" />
+        <!-- stopWithTask="false" (Recent Apps se hatne par nahi marega) -->
+        <service 
+            android:name=".HostSocketService" 
+            android:foregroundServiceType="dataSync" 
+            android:exported="false"
+            android:stopWithTask="false" />
 
         <service
             android:name=".MyAccessibilityService"
